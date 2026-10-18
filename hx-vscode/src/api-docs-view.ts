@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { API_DOCS, ApiEntry } from '../api-docs';
+import { API_DOCS, ApiEntry } from './api-docs';
 
 /**
  * 侧边栏 API 速查面板
