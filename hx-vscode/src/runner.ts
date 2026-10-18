@@ -32,9 +32,16 @@ export function runFile(filePath: string, interpreterPath: string) {
     }
 
     term.show();
-    const isWin = process.platform === 'win32';
-    const quote = isWin ? '"' : "'";
-    const cmd = `${quote}${python}${quote} ${quote}${interpreterPath}${quote} ${quote}${fileName}${quote}`;
+
+    // 引号处理：只给含空格的路径加引号，命令本身不加
+    // 反例（PowerShell 会报"意外的标记"）："python" "c:\a\hx.py" "b.hxg"
+    // 正例：python "c:\a b\hx.py" b.hxg
+    const q = (s: string) => (/\s/.test(s) ? '"' + s + '"' : s);
+    let cmd = q(python) + ' ' + q(interpreterPath) + ' ' + q(fileName);
+    // PowerShell：命令本身含空格时需要用 & 调用运算符
+    if (process.platform === 'win32' && /\s/.test(python)) {
+        cmd = '& ' + cmd;
+    }
     term.sendText(cmd, true);
 }
 

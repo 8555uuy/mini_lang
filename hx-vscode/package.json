@@ -9,7 +9,12 @@
   },
   "categories": ["Programming Languages", "Snippets", "Other"],
   "activationEvents": [
-    "onLanguage:hx"
+    "onLanguage:hx",
+    "onCommand:hx.run",
+    "onCommand:hx.openAgent",
+    "onCommand:hx.openDesigner",
+    "onCommand:hx.setApiKey",
+    "onCommand:hx.cheatsheet"
   ],
   "main": "./out/extension.js",
   "contributes": {
