@@ -1,11 +1,11 @@
 # MiniLang v2 —— 解释器 + Tkinter 编码器
-# 语法：x = 1;  fn f(a,b){...}  if/else if/else  while  for  return
+# 语法：x = 1;  f(a,b){...}  if/else if/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
 import sys, re, os, math, json, threading, queue, time
 import urllib.request, urllib.error
 
 KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
-            "fn","return","true","false","null","and","or","not","try","catch"}
+            "return","true","false","null","and","or","not","try","catch"}
 OPS = ["==","!=","<=",">=","+=","-=","*=","/=","%=","+","-","*","/","%","<",">","=",
        "(",")","{","}","[","]",",",";",":","."]
 
@@ -123,20 +123,15 @@ class Parser:
             raise SyntaxError("第 %d 行：%s 声明已废弃，请直接写 x = 1;（自动判断类型）" % (line,t.k))
         if t.k=="id" and t.v=="print" and self.peek(1).k!="(":
             raise SyntaxError("第 %d 行：print 必须加括号，写成 print(...)" % line)
-        if self.eat("fn"):
-            name=self.take("id").v; self.take("("); ps=[]
-            while not self.at(")"):
-                ps.append(self.take("id").v)
-                if not self.eat(","): break
-            self.take(")")
-            return ("fn",name,ps,self.block(),line)
+        if t.k=="id" and t.v=="fn":
+            raise SyntaxError("第 %d 行：没有 fn 关键字，直接写 名字(参数) { ... }" % line)
         if self._is_fn_def():
             name=self.take("id").v; self.take("("); ps=[]
             while not self.at(")"):
                 ps.append(self.take("id").v)
                 if not self.eat(","): break
             self.take(")")
-            return ("fn",name,ps,self.block(),line)
+            return ("func",name,ps,self.block(),line)
         if self.eat("return"):
             e=None if self.at("}",";","eof") else self.expr()
             self.end()
@@ -501,7 +496,7 @@ class Interp:
         k=n[0]
         if k=="block":
             for s in n[1]: self.ex(s)
-        elif k=="fn":
+        elif k=="func":
             self.env.define(n[1],Fn(n[2],n[3],self.env,n[1]))
         elif k=="return":
             raise Return(self.ev(n[1]) if n[1] is not None else None)
@@ -686,9 +681,9 @@ CHEATSHEET = {
   'help()               打印语法速查',
 ],
 "函数": [
-  "add(a, b) { return a + b; }     定义函数（C 风格，无 fn）",
+  "add(a, b) { return a + b; }     定义函数（C 风格）",
   "递归：fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); }",
-  "fn add(a, b) { ... }            旧写法仍兼容",
+  "noop() { }                      无参函数",
 ],
 "控制流": [
   "if (c) { ... } else { ... }",
@@ -787,8 +782,8 @@ print(s + "!" + 1);
 if (sum > 5 and true) { print("ok"); } else { print("bad"); }
 '''
 
-TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|in|fn|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
-KW = {"dar","if","else","elif","while","for","in","break","continue","del","fn","return","true","false","null","and","or","not","try","catch"}
+TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|in|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
+KW = {"dar","if","else","elif","while","for","in","break","continue","del","return","true","false","null","and","or","not","try","catch"}
 
 
 def idx_of(txt,off):
@@ -828,7 +823,7 @@ AI_SYSTEM_PROMPT = (
     "你叫小智，是 HX 语言（源文件后缀 .hxg）的编程向导，帮助用户在 HX 语言的编程世界里闯荡。\n\n"
     "HX 语言语法要点：\n"
     "- 变量直接赋值即声明，自动推断类型：x = 10;  s = \"hi\";  arr = [1,2,3];  d = {a:1};\n"
-    "- 函数（C 风格）：add(a, b) { return a + b; }  旧写法 fn add(a,b){} 仍兼容\n"
+    "- 函数（C 风格）：add(a, b) { return a + b; }  没有 fn 关键字\n"
     "- 条件：if (c) { } else if (c2) { } else { }（没有 elif）\n"
     "- 循环：while (c) { }  /  for (x in arr) { }  /  for (i = 0; i < n; i += 1) { }\n"
     "- 异常：try { } catch (e) { }\n"
