@@ -9,9 +9,12 @@ include = [
     "syntaxes/hx.tmLanguage.json",
     "snippets/hx.json",
     "python/hx.py",
+    "python/hx_check.py",
     "out/extension.js",
     "out/providers.js",
     "out/runner.js",
+    "out/diagnostics.js",
+    "out/symbols.js",
     "out/agent/panel.js",
     "out/designer/panel.js",
 ]
@@ -28,7 +31,3 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             continue
         z.write(src, "extension/" + rel)
 print("VSIX: " + out + " (" + str(os.path.getsize(out)) + " bytes)")
-print("--- 内容 ---")
-z = zipfile.ZipFile(out)
-for n in z.namelist():
-    print("  " + n)

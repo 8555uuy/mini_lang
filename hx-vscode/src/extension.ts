@@ -5,6 +5,8 @@ import { runFile } from './runner';
 import { AgentPanel } from './agent/panel';
 import { DesignerPanel } from './designer/panel';
 import { HxCompletionProvider, HxHoverProvider } from './providers';
+import { DiagnosticsManager } from './diagnostics';
+import { HxDocumentSymbolProvider } from './symbols';
 
 let agentPanel: AgentPanel | undefined;
 let designerPanel: DesignerPanel | undefined;
@@ -131,6 +133,16 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.languages.registerHoverProvider(selector, new HxHoverProvider())
     );
+    context.subscriptions.push(
+        vscode.languages.registerDocumentSymbolProvider(selector, new HxDocumentSymbolProvider())
+    );
+
+    // 实时语法诊断
+    const diagMgr = new DiagnosticsManager(context);
+    for (const d of diagMgr.register()) {
+        context.subscriptions.push(d);
+    }
+    context.subscriptions.push({ dispose: () => diagMgr.dispose() });
 
     const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusItem.text = '$(sparkle) 小智';
