@@ -411,13 +411,13 @@ class Interp:
         g.define("str",Native(lambda a: fmt(a[0])))
         g.define("num",Native(lambda a: to_num(a[0])))
         g.define("range",Native(lambda a: [float(x) for x in range(int(a[0]))]))
-        g.define("gwin",Native(lambda a: self.g_win(int(a[0]) if len(a)>0 else 640, int(a[1]) if len(a)>1 else 480)))
-        g.define("gline",Native(lambda a: self.g_canvas().create_line(a[0],a[1],a[2],a[3],fill=str(a[4]) if len(a)>4 else "black",width=float(a[5]) if len(a)>5 else 2)))
-        g.define("grect",Native(lambda a: self.g_canvas().create_rectangle(a[0],a[1],a[2],a[3],outline=str(a[4]) if len(a)>4 else "black",fill=str(a[5]) if len(a)>5 else "")))
-        g.define("gcircle",Native(lambda a: self.g_canvas().create_oval(a[0]-a[2],a[1]-a[2],a[0]+a[2],a[1]+a[2],outline=str(a[3]) if len(a)>3 else "black",fill=str(a[4]) if len(a)>4 else "")))
-        g.define("gtext",Native(lambda a: self.g_canvas().create_text(a[0],a[1],text=fmt(a[2]),fill=str(a[3]) if len(a)>3 else "black",font=("Microsoft YaHei UI",12))))
-        g.define("gclear",Native(lambda a: self.g_canvas().delete("all")))
-        g.define("gsleep",Native(lambda a: self.g_sleep(int(a[0]) if a else 10)))
+        g.define("gwin",Native(self.g_win))
+        g.define("gline",Native(self.g_line))
+        g.define("grect",Native(self.g_rect))
+        g.define("gcircle",Native(self.g_circle))
+        g.define("gtext",Native(self.g_text))
+        g.define("gclear",Native(self.g_clear))
+        g.define("gsleep",Native(self.g_sleep))
 
     def ask(self):
         if self.ask_fn: return self.ask_fn()
@@ -427,31 +427,101 @@ class Interp:
     def text(self): return "".join(self.outbuf)
     def out(self,s): self.outbuf.append(s)
 
-    def g_win(self, w, h):
+    def _g_num(self, v, fname, pname):
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise MiniError(f"{fname} 的 {pname} 必须是数字，得到：{fmt(v)}")
+        return float(v)
+
+    def _g_color(self, v, fname, pname):
+        if not isinstance(v, str):
+            raise MiniError(f"{fname} 的 {pname} 必须是字符串，得到：{fmt(v)}")
+        return v
+
+    def g_win(self, args):
         import tkinter as tk
+        if len(args) < 2:
+            raise MiniError('gwin 需要至少 2 个参数：宽, 高。例如 gwin(600, 400, "我的画板")')
+        w = int(self._g_num(args[0], "gwin", "宽"))
+        h = int(self._g_num(args[1], "gwin", "高"))
+        title = str(args[2]) if len(args) > 2 else "HX 图形窗口"
+        if w <= 0 or h <= 0:
+            raise MiniError("gwin 的宽和高必须大于 0")
+        
         if self.gwin is not None:
             try: self.gwin.destroy()
             except Exception: pass
-        if self.root is not None:
-            self.gwin = tk.Toplevel(self.root)
-        else:
-            self.gwin = tk.Tk()
-            self._owns_gwin = True
-        self.gwin.title("HX 图形窗口")
-        self.gwin.configure(bg="white")
-        self.gwin.geometry("%dx%d"%(w,h))
-        self.gcanvas = tk.Canvas(self.gwin,width=w,height=h,bg="white",highlightthickness=0)
-        self.gcanvas.pack(fill="both",expand=True)
-        try: self.gwin.update()
-        except Exception: pass
+        
+        try:
+            if self.root is not None:
+                self.gwin = tk.Toplevel(self.root)
+            else:
+                self.gwin = tk.Tk()
+                self._owns_gwin = True
+            self.gwin.title(title)
+            self.gwin.configure(bg="white")
+            self.gwin.geometry("%dx%d"%(w,h))
+            self.gcanvas = tk.Canvas(self.gwin,width=w,height=h,bg="white",highlightthickness=0)
+            self.gcanvas.pack(fill="both",expand=True)
+            self.gwin.update()
+        except Exception as e:
+            raise MiniError(f"创建图形窗口失败：{e}")
         return None
 
     def g_canvas(self):
         if self.gcanvas is None:
-            raise MiniError("请先调用 gwin(w, h) 创建图形窗口")
+            raise MiniError("请先调用 gwin(宽, 高) 创建图形窗口，再进行绘制")
         return self.gcanvas
 
-    def g_sleep(self, ms):
+    def g_line(self, args):
+        if len(args) < 4:
+            raise MiniError("gline 需要至少 4 个参数：(x1, y1, x2, y2, color, width)")
+        c = self.g_canvas()
+        x1=self._g_num(args[0],"gline","x1"); y1=self._g_num(args[1],"gline","y1")
+        x2=self._g_num(args[2],"gline","x2"); y2=self._g_num(args[3],"gline","y2")
+        color=self._g_color(args[4],"gline","color") if len(args)>4 else "black"
+        width=self._g_num(args[5],"gline","width") if len(args)>5 else 2
+        try: return c.create_line(x1,y1,x2,y2,fill=color,width=width)
+        except Exception as e: raise MiniError(f"gline 绘制失败（颜色名是否正确？）：{e}")
+
+    def g_rect(self, args):
+        if len(args) < 4:
+            raise MiniError("grect 需要至少 4 个参数：(x1, y1, x2, y2, color, fill)")
+        c = self.g_canvas()
+        x1=self._g_num(args[0],"grect","x1"); y1=self._g_num(args[1],"grect","y1")
+        x2=self._g_num(args[2],"grect","x2"); y2=self._g_num(args[3],"grect","y2")
+        color=self._g_color(args[4],"grect","color") if len(args)>4 else "black"
+        fill=self._g_color(args[5],"grect","fill") if len(args)>5 else ""
+        try: return c.create_rectangle(x1,y1,x2,y2,outline=color,fill=fill)
+        except Exception as e: raise MiniError(f"grect 绘制失败（颜色名是否正确？）：{e}")
+
+    def g_circle(self, args):
+        if len(args) < 3:
+            raise MiniError("gcircle 需要至少 3 个参数：(cx, cy, r, color, fill)")
+        c = self.g_canvas()
+        cx=self._g_num(args[0],"gcircle","cx"); cy=self._g_num(args[1],"gcircle","cy")
+        r=self._g_num(args[2],"gcircle","r")
+        if r < 0: raise MiniError("gcircle 的半径 r 不能为负数")
+        color=self._g_color(args[3],"gcircle","color") if len(args)>3 else "black"
+        fill=self._g_color(args[4],"gcircle","fill") if len(args)>4 else ""
+        try: return c.create_oval(cx-r,cy-r,cx+r,cy+r,outline=color,fill=fill)
+        except Exception as e: raise MiniError(f"gcircle 绘制失败（颜色名是否正确？）：{e}")
+
+    def g_text(self, args):
+        if len(args) < 3:
+            raise MiniError("gtext 需要至少 3 个参数：(x, y, text, color)")
+        c = self.g_canvas()
+        x=self._g_num(args[0],"gtext","x"); y=self._g_num(args[1],"gtext","y")
+        text=fmt(args[2])
+        color=self._g_color(args[3],"gtext","color") if len(args)>3 else "black"
+        try: return c.create_text(x,y,text=text,fill=color,font=("Microsoft YaHei UI",12))
+        except Exception as e: raise MiniError(f"gtext 绘制失败：{e}")
+
+    def g_clear(self, args):
+        self.g_canvas().delete("all")
+        return None
+
+    def g_sleep(self, args):
+        ms = int(self._g_num(args[0],"gsleep","毫秒数")) if args else 10
         try:
             if self.gwin is not None: self.gwin.update()
             time.sleep(max(0, ms)/1000.0)
@@ -723,6 +793,7 @@ CHEATSHEET = {
 ],
 "图形": [
   "gwin(600, 400);          创建图形窗口（宽, 高）",
+  "gwin(600, 400, \"我的画板\");  创建带自定义标题的窗口",
   "gline(x1, y1, x2, y2, \"red\", 3);   画线（颜色、线宽可省）",
   "grect(x1, y1, x2, y2, \"black\", \"skyblue\");  矩形，最后一个参数为空串则空心",
   "gcircle(cx, cy, r, \"black\", \"yellow\");        圆",
@@ -830,7 +901,7 @@ AI_SYSTEM_PROMPT = (
     "- 字符串插值：\"hi \u0024{x}\"\n"
     "- print 必须加括号：print(\"hi\", 1);\n"
     "- 内置：dar(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
-    "- 图形：gwin(w,h) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
+    "- 图形：gwin(w,h,title) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
     "gcircle(cx,cy,r,color,fill)、gtext(x,y,text,color)、gclear()、gsleep(ms) 刷新并暂停\n"
     "- 注释用 #，语句末尾分号可省\n\n"
     "回答要简洁、直接给可运行的 HX 代码，用 " + FENCE + "hxg 代码块包裹。"
