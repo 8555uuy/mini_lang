@@ -28,6 +28,7 @@ sum = 0;
 while (i < len(arr)) { sum = sum + arr[i]; i = i + 1; }
 print("sum =", sum);
 
-for (k in d) { print("key:", k); }
+ks = keys(d);
+for (i = 0; i < len(ks); i += 1) { print("key:", ks[i]); }
 for (j = 0; j < 3; j += 1) { print("j =", j); }
 print(upper("abc"), max([3,9,2]));

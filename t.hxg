@@ -5,8 +5,10 @@ set(d,"e",5);
 print(items(d));
 del d.a;
 print(d);
-for (k in d) { print("key:", k); }
-for (x in [10,20,30]) { if (x == 20) { continue; } print("x:", x); }
+ks = keys(d);
+for (i = 0; i < len(ks); i += 1) { print("key:", ks[i]); }
+nums = [10,20,30];
+for (i = 0; i < len(nums); i += 1) { if (nums[i] == 20) { continue; } print("x:", nums[i]); }
 i = 0;
 while (true) { i += 1; if (i > 3) { break; } }
 print("i =", i, "i>3 =", i > 3);

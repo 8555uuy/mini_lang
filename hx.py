@@ -4,7 +4,7 @@
 import sys, re, os, math, json, threading, queue, time
 import urllib.request, urllib.error
 
-KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
+KEYWORDS = {"let","dar","if","else","elif","while","for","break","continue","del",
             "return","true","false","null","and","or","not","try","catch"}
 OPS = ["==","!=","<=",">=","+=","-=","*=","/=","%=","+","-","*","/","%","<",">","=",
        "(",")","{","}","[","]",",",";",":","."]
@@ -152,11 +152,9 @@ class Parser:
             self.take("("); c=self.expr(); self.take(")")
             return ("while",c,self.stmt(),line)
         if self.eat("for"):
-            self.take("(")
             if self.at("id") and self.peek(1).k=="in":
-                name=self.take("id").v; self.take("in")
-                seq=self.expr(); self.take(")")
-                return ("forin",name,seq,self.stmt(),line)
+                raise SyntaxError("第 %d 行：不支持 for (x in arr)，请用 for (i = 0; i < len(arr); i += 1)" % line)
+            self.take("(")
             init=None if self.at(";") else self.expr()
             self.take(";")
             cond=None if self.at(";") else self.expr()
@@ -591,16 +589,6 @@ class Interp:
                 try: self.ex(n[2])
                 except BreakSig: break
                 except ContinueSig: continue
-        elif k=="forin":
-            seq=self.ev(n[2])
-            if isinstance(seq,dict): seq=list(seq.keys())
-            if not isinstance(seq,(list,str,dict)):
-                raise MiniError("第 %d 行：for x in ... 只能遍历数组/字符串/字典" % n[-1])
-            for item in list(seq):
-                self.env.define(n[1],item)
-                try: self.ex(n[3])
-                except BreakSig: break
-                except ContinueSig: continue
         elif k=="forc":
             _,init,cond,step,body,ln=n
             if init is not None: self.ev(init)
@@ -759,8 +747,9 @@ CHEATSHEET = {
   "if (c) { ... } else { ... }",
   "else if (c) { ... }       多分支，串在 else 后面（没有 elif）",
   "while (c) { ... }",
-  "for (x in arr) { ... }     遍历 数组/字符串/字典(键)",
   "for (i = 0; i < n; i += 1) { ... }   C 式三段循环，三段均可省略",
+  "遍历数组：for (i = 0; i < len(a); i += 1) { print(a[i]); }",
+  "遍历字典：ks = keys(d); for (i = 0; i < len(ks); i += 1) { print(ks[i]); }",
   "break;   continue;",
   "try { ... } catch (e) { ... }   捕获错误，e 为错误信息",
   "and / or / not",
@@ -845,16 +834,16 @@ sum = 0;
 while (i < len(arr)) { sum = sum + arr[i]; i = i + 1; }
 print("sum =", sum);
 
-for (x in arr) { print("项:", x); }
-for (j = 0; j < 3; j += 1) { print("j =", j); }
+for (j = 0; j < len(arr); j += 1) { print("项:", arr[j]); }
+for (k = 0; k < 3; k += 1) { print("k =", k); }
 
 s = "hi";
 print(s + "!" + 1);
 if (sum > 5 and true) { print("ok"); } else { print("bad"); }
 '''
 
-TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|in|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
-KW = {"dar","if","else","elif","while","for","in","break","continue","del","return","true","false","null","and","or","not","try","catch"}
+TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
+KW = {"dar","if","else","elif","while","for","break","continue","del","return","true","false","null","and","or","not","try","catch"}
 
 
 def idx_of(txt,off):
@@ -896,7 +885,7 @@ AI_SYSTEM_PROMPT = (
     "- 变量直接赋值即声明，自动推断类型：x = 10;  s = \"hi\";  arr = [1,2,3];  d = {a:1};\n"
     "- 函数（C 风格）：add(a, b) { return a + b; }  没有 fn 关键字\n"
     "- 条件：if (c) { } else if (c2) { } else { }（没有 elif）\n"
-    "- 循环：while (c) { }  /  for (x in arr) { }  /  for (i = 0; i < n; i += 1) { }\n"
+    "- 循环：while (c) { }  /  for (i = 0; i < n; i += 1) { }  没有 for-in\n"
     "- 异常：try { } catch (e) { }\n"
     "- 字符串插值：\"hi \u0024{x}\"\n"
     "- print 必须加括号：print(\"hi\", 1);\n"
@@ -927,6 +916,49 @@ def ai_save_config(cfg):
         return True
     except Exception:
         return False
+
+
+def ai_chat_stream(cfg, messages, on_chunk):
+    """流式请求；每个增量片段调用 on_chunk(text)，返回完整文本。"""
+    url = (cfg.get("base_url") or "").rstrip("/")
+    if not url:
+        raise ValueError("Base URL 未配置")
+    if not url.endswith("/chat/completions"):
+        url = url + "/chat/completions"
+    payload = {
+        "model": cfg.get("model") or "gpt-3.5-turbo",
+        "messages": [{"role": "system", "content": AI_SYSTEM_PROMPT}] + list(messages),
+        "temperature": 0.7,
+        "stream": True,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "text/event-stream")
+    req.add_header("Authorization", "Bearer " + (cfg.get("api_key") or ""))
+    full = []
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8", "replace").strip()
+            if not line or not line.startswith("data:"):
+                continue
+            chunk = line[5:].strip()
+            if chunk == "[DONE]":
+                break
+            try:
+                obj = json.loads(chunk)
+            except Exception:
+                continue
+            choices = obj.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            piece = delta.get("content")
+            if piece:
+                full.append(piece)
+                try: on_chunk(piece)
+                except Exception: pass
+    return "".join(full)
 
 
 def ai_chat(cfg, messages):
@@ -1510,27 +1542,55 @@ def build_gui(initial_path=None):
         ai_state["busy"]=True; ai_send_btn_state(True)
         chat_append("小智正在思考…\n", "sys")
         cfg=dict(ai_cfg); hist=list(ai_state["history"])
+        ai_state["streaming"]=True
         def worker():
-            try: ai_q.put(("ok", ai_chat(cfg, hist)))
-            except Exception as e: ai_q.put(("err", str(e)))
+            try:
+                def on_chunk(p):
+                    ai_q.put(("chunk", p))
+                full=ai_chat_stream(cfg, hist, on_chunk)
+                ai_q.put(("ok", full))
+            except Exception as e:
+                ai_q.put(("err", str(e)))
         threading.Thread(target=worker, daemon=True).start()
     def ai_poll():
         try:
             while True:
                 kind,val=ai_q.get_nowait()
                 chat.configure(state="normal")
-                idx=chat.search("小智正在思考…","1.0","end")
-                if idx:
-                    end=chat.index(idx+" lineend +1c"); chat.delete(idx,end)
-                chat.configure(state="disabled")
-                if kind=="ok":
+                # 首次收到数据：删掉"正在思考"，插入"小智："标题，记录流式起点
+                if ai_state.get("streaming"):
+                    idx=chat.search("小智正在思考…","1.0","end")
+                    if idx:
+                        end=chat.index(idx+" lineend +1c"); chat.delete(idx,end)
+                    chat.insert("end","小智：\n","ai_label")
+                    ai_state["stream_start"]=chat.index("end-1c")
+                    ai_state["streaming"]=False
+                if kind=="chunk":
+                    chat.insert("end", val, "ai_text")
+                    chat.see("end")
+                elif kind=="ok":
+                    # 删除流式原文，用格式化渲染替换
+                    start=ai_state.get("stream_start")
+                    if start:
+                        chat.delete(start, "end")
+                    chat.insert("end","小智：\n","ai_label")
+                    chat.configure(state="disabled")
                     ai_state["history"].append({"role":"assistant","content":val})
-                    chat_append("小智：\n","ai_label"); ai_render_reply(val)
-                else:
-                    chat_append("出错了："+val+"\n\n","err")
-                ai_state["busy"]=False; ai_send_btn_state(False)
+                    ai_render_reply(val)
+                    chat.configure(state="normal")
+                    ai_state["stream_start"]=None
+                    ai_state["busy"]=False; ai_send_btn_state(False)
+                elif kind=="err":
+                    start=ai_state.get("stream_start")
+                    if start:
+                        chat.delete(start, "end")
+                    chat.insert("end","出错了："+val+"\n\n","err")
+                    chat.see("end")
+                    ai_state["stream_start"]=None
+                    ai_state["busy"]=False; ai_send_btn_state(False)
+                chat.configure(state="disabled")
         except queue.Empty: pass
-        root.after(120, ai_poll)
+        root.after(60, ai_poll)
     def ai_key(ev):
         if ev.state & 0x0001 and ev.keysym=="Return": return None
         if ev.keysym=="Return" and not (ev.state & 0x0001):
