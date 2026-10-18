@@ -16,13 +16,13 @@
 
 ```bash
 # 命令行运行
-python hx.py demo.hx
+python hx.py demo.hxg
 
 # 打开图形编码器
 python hx.py
 
 # 用编码器打开指定文件
-python hx.py --edit demo.hx
+python hx.py --edit demo.hxg
 ```
 
 ## 语法速览
@@ -92,7 +92,7 @@ print("x = ${x}, x+1 = ${x + 1}");
 
 ## 文件关联（可选）
 
-运行以下命令后，双击任意 `.hx` 文件将用编码器打开（仅当前用户，无需管理员）：
+运行以下命令后，双击任意 `.hxg` 文件将用编码器打开（仅当前用户，无需管理员）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File register_filetype.ps1
@@ -106,8 +106,8 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 
 ```
 hx.py                    解释器 + Tkinter 图形编码器
-demo.hx / t.hx / f4.hx / auto.hx   示例程序
-hx.ico                   .hx 文件图标
+demo.hxg / t.hxg / f4.hxg / auto.hxg   示例程序
+hx.ico                   .hxg 文件图标
 make_icon.py             图标生成脚本
 register_filetype.ps1    Windows 文件关联注册
 unregister_filetype.ps1  撤销文件关联

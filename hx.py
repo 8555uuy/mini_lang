@@ -991,7 +991,7 @@ def build_gui(initial_path=None):
     def do_sample(): load_text(SAMPLE)
 
     def do_open():
-        p=filedialog.askopenfilename(filetypes=[("HX 源码","*.hx"),("所有文件","*.*")])
+        p=filedialog.askopenfilename(filetypes=[("HX 源码","*.hxg"),("所有文件","*.*")])
         if not p: return
         with open(p,encoding="utf-8") as f: s=f.read()
         load_text(s,p)
@@ -999,8 +999,8 @@ def build_gui(initial_path=None):
     def do_save():
         p=cur["path"]
         if not p:
-            p=filedialog.asksaveasfilename(defaultextension=".hx",
-                filetypes=[("HX 源码","*.hx")])
+            p=filedialog.asksaveasfilename(defaultextension=".hxg",
+                filetypes=[("HX 源码","*.hxg")])
             if not p: return
         with open(p,"w",encoding="utf-8") as f: f.write(ed.get("1.0","end-1c"))
         cur["path"]=p; root.title("HX 语言编码器 - "+p)

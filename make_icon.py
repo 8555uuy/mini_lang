@@ -1,4 +1,4 @@
-# 生成 .hx 文件图标（多尺寸 .ico）
+# 生成 .hxg 文件图标（多尺寸 .ico）
 from PIL import Image, ImageDraw, ImageFont
 import os
 

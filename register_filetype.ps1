@@ -1,4 +1,4 @@
-# Associate .hx with HX Language Editor (current user only, no admin needed)
+# Associate .hxg with HX Language Editor (current user only, no admin needed)
 # Usage: powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 
 $ErrorActionPreference = "Stop"
@@ -37,10 +37,10 @@ New-Item -Path "$base\shell\open\command" -Force | Out-Null
 Set-ItemProperty -Path "$base\shell\open\command" -Name "(Default)" -Value $cmd
 
 # 2) Extension
-$ext = "HKCU:\Software\Classes\.hx"
+$ext = "HKCU:\Software\Classes\.hxg"
 New-Item -Path $ext -Force | Out-Null
 Set-ItemProperty -Path $ext -Name "(Default)" -Value $progId
-$owp = "HKCU:\Software\Classes\.hx\OpenWithProgids"
+$owp = "HKCU:\Software\Classes\.hxg\OpenWithProgids"
 New-Item -Path $owp -Force | Out-Null
 New-ItemProperty -Path $owp -Name $progId -PropertyType None -Value ([byte[]]@()) -Force | Out-Null
 
@@ -57,5 +57,5 @@ Write-Host "Done."
 Write-Host ("  python : " + $pyw)
 Write-Host ("  script : " + $script)
 Write-Host ("  icon   : " + $icon)
-Write-Host "Double-click any .hx file to open it in HX Language Editor."
+Write-Host "Double-click any .hxg file to open it in HX Language Editor."
 Write-Host "To undo: run unregister_filetype.ps1"
