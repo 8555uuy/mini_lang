@@ -816,6 +816,31 @@ class Interp:
         else:
             raise MiniError("无法执行 %s" % k)
 
+    def _is_num(self, v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+    def _vdesc(self, v):
+        t = typename(v)
+        s = fmt(v)
+        if len(s) > 30:
+            s = s[:27] + "..."
+        if t == "字符串":
+            s = '"' + s + '"'
+        return t + " " + s
+
+    def _need_nums(self, l, r, op, ln):
+        if not self._is_num(l) or not self._is_num(r):
+            raise MiniError("第 %d 行：%s 需要两个数字，得到 %s 和 %s"
+                            % (ln, op, self._vdesc(l), self._vdesc(r)))
+
+    def _need_cmp(self, l, r, op, ln):
+        if self._is_num(l) and self._is_num(r):
+            return
+        if isinstance(l, str) and isinstance(r, str):
+            return
+        raise MiniError("第 %d 行：%s 两边类型不匹配，得到 %s 和 %s"
+                        % (ln, op, self._vdesc(l), self._vdesc(r)))
+
     def ev(self,n):
         k=n[0]
         if k in ("num","str","bool","null"): return n[1]
@@ -825,7 +850,12 @@ class Interp:
         if k=="dict": return dict((kk,self.ev(v)) for kk,v in n[1])
         if k=="un":
             v=self.ev(n[2])
-            return (-v) if n[1]=="-" else (not truth(v))
+            if n[1]=="-":
+                if not self._is_num(v):
+                    raise MiniError("第 %d 行：负号只能用于数字，得到 %s"
+                                    % (n[-1], self._vdesc(v)))
+                return -v
+            return not truth(v)
         if k=="bin":
             op=n[1]
             if op=="and":
@@ -835,24 +865,38 @@ class Interp:
                 l=self.ev(n[2])
                 return l if truth(l) else self.ev(n[3])
             l=self.ev(n[2]); r=self.ev(n[3])
+            ln=n[-1]
             if op=="==": return l==r
             if op=="!=": return l!=r
             if op=="+":
                 if isinstance(l,str) or isinstance(r,str): return fmt(l)+fmt(r)
+                if isinstance(l,list) and isinstance(r,list):
+                    raise MiniError("第 %d 行：数组不能用 + 拼接，请用 push 逐个添加" % ln)
+                self._need_nums(l,r,"+",ln)
                 return l+r
-            if op=="-": return l-r
-            if op=="*": return l*r
+            if op=="-":
+                self._need_nums(l,r,"-",ln)
+                return l-r
+            if op=="*":
+                self._need_nums(l,r,"*",ln)
+                return l*r
             if op=="/":
-                if r==0: raise ZeroDivisionError()
+                self._need_nums(l,r,"/",ln)
+                if r==0: raise MiniError("第 %d 行：除数为 0" % ln)
                 return l/r
             if op=="%":
-                if r==0: raise ZeroDivisionError()
+                self._need_nums(l,r,"%",ln)
+                if r==0: raise MiniError("第 %d 行：取模的除数为 0" % ln)
                 return l%r
-            if op=="<": return l<r
-            if op==">": return l>r
-            if op=="<=": return l<=r
-            if op==">=": return l>=r
-            raise MiniError("未知运算符 %s" % op)
+            if op=="<":
+                self._need_cmp(l,r,"<",ln); return l<r
+            if op==">":
+                self._need_cmp(l,r,">",ln); return l>r
+            if op=="<=":
+                self._need_cmp(l,r,"<=",ln); return l<=r
+            if op==">=":
+                self._need_cmp(l,r,">=",ln); return l>=r
+            raise MiniError("第 %d 行：未知运算符 %s" % (ln, op))
         if k=="set":
             v=self.ev(n[2]); self.assign(n[1],v); return v
         if k=="call":
