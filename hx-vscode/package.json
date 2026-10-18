@@ -1,23 +1,13 @@
 {
   "name": "hx-lang",
   "displayName": "HX Language",
-  "description": "HX 语言官方扩展：语法高亮、智能补全、小智 Agent、UI 画板",
-  "version": "0.1.0",
+  "description": "HX 语言的 VS Code 扩展：语法高亮、智能补全、小智 Agent、UI 画板",
+  "version": "0.2.0",
   "publisher": "hx-lang",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.70.0"
   },
-  "categories": ["Programming Languages", "Snippets", "Other"],
-  "activationEvents": [
-    "onLanguage:hx",
-    "onCommand:hx.run",
-    "onCommand:hx.openAgent",
-    "onCommand:hx.openDesigner",
-    "onCommand:hx.setApiKey",
-    "onCommand:hx.cheatsheet",
-    "onCommand:hx.openAgentText",
-    "onView:hx.apiDocs"
-  ],
+  "categories": ["Programming Languages", "Snippets"],
   "main": "./out/extension.js",
   "contributes": {
     "languages": [
@@ -42,33 +32,13 @@
       }
     ],
     "commands": [
-      {
-        "command": "hx.run",
-        "title": "HX: 运行当前文件",
-        "icon": "$(play)"
-      },
-      {
-        "command": "hx.openAgent",
-        "title": "HX: 打开小智",
-        "icon": "$(sparkle)"
-      },
-      {
-        "command": "hx.openAgentText",
-        "title": "HX: 打开小智（文字版）"
-      },
-      {
-        "command": "hx.openDesigner",
-        "title": "HX: 打开 UI 画板",
-        "icon": "$(symbol-class)"
-      },
-      {
-        "command": "hx.setApiKey",
-        "title": "HX: 配置小智 API"
-      },
-      {
-        "command": "hx.cheatsheet",
-        "title": "HX: 语法速查"
-      }
+      { "command": "hx.run", "title": "HX: 运行当前文件", "icon": "$(play)" },
+      { "command": "hx.openAgentText", "title": "HX: 打开小智", "icon": "$(sparkle)" },
+      { "command": "hx.openAgent", "title": "HX: 打开小智（面板版）" },
+      { "command": "hx.openDesigner", "title": "HX: 打开 UI 画板", "icon": "$(symbol-class)" },
+      { "command": "hx.setApiKey", "title": "HX: 配置小智 API" },
+      { "command": "hx.cheatsheet", "title": "HX: 语法速查" },
+      { "command": "hx.diagnose", "title": "HX: 运行诊断" }
     ],
     "viewsContainers": {
       "activitybar": [
@@ -83,12 +53,29 @@
       "hx-sidebar": [
         {
           "id": "hx.apiDocs",
-          "name": "API 速查",
-          "icon": "media/hx-icon.svg"
+          "name": "API 速查"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "hx.apiDocs",
+        "contents": "点击左侧分类展开函数列表。\n\n[搜索 API](command:hx.searchApi)\n[打开语法速查](command:hx.cheatsheet)"
+      }
+    ],
     "menus": {
+      "view/title": [
+        {
+          "command": "hx.searchApi",
+          "when": "view == hx.apiDocs",
+          "group": "navigation"
+        },
+        {
+          "command": "hx.clearApiFilter",
+          "when": "view == hx.apiDocs",
+          "group": "navigation"
+        }
+      ],
       "editor/title": [
         {
           "command": "hx.run",
@@ -96,7 +83,7 @@
           "group": "navigation"
         },
         {
-          "command": "hx.openAgent",
+          "command": "hx.openAgentText",
           "when": "resourceExtname == .hxg",
           "group": "navigation"
         }
@@ -115,6 +102,10 @@
         {
           "command": "hx.cheatsheet",
           "group": "hx@3"
+        },
+        {
+          "command": "hx.diagnose",
+          "group": "hx@4"
         }
       ]
     },
@@ -129,7 +120,7 @@
         "hx.interpreterPath": {
           "type": "string",
           "default": "",
-          "description": "hx.py 的绝对路径，留空则自动在扩展目录和当前工作区查找"
+          "description": "hx.py 的绝对路径，留空则自动查找"
         },
         "hx.ai.baseUrl": {
           "type": "string",
@@ -144,19 +135,17 @@
         "hx.ai.apiKey": {
           "type": "string",
           "default": "",
-          "description": "API Key（建议用命令面板执行 HX: 配置小智 API 保存到 SecretStorage）",
-          "markdownDescription": "API Key，建议用命令 **HX: 配置小智 API** 保存到 VS Code SecretStorage"
+          "description": "API Key（建议用命令 HX: 配置小智 API 保存）"
         }
       }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./"
   },
   "devDependencies": {
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.70.0",
     "@types/node": "^20.0.0",
     "typescript": "^5.4.0"
   }
