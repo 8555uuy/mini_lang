@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { getApiConfig } from '../extension';
-import { findPython, clearPythonCache } from '../python-finder';
+import { getApiConfig } from './extension';
+import { clearPythonCache } from './python-finder';
 
 /**
  * 设置面板

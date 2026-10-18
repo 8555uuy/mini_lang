@@ -38,3 +38,5 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             continue
         z.write(src, "extension/" + rel)
 print("VSIX: " + out + " (" + str(os.path.getsize(out)) + " bytes)")
+z = zipfile.ZipFile(out)
+print("文件数: " + str(len(z.namelist())))
