@@ -112,6 +112,40 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 
 图标文件 `hx.ico` 由 `make_icon.py` 生成（需要 Pillow）。
 
+## UI 设计器
+
+按 `Ctrl+U` 打开可视化界面设计器：
+
+- **16 种组件**，按「基础 / 输入 / 显示 / 布局」分组
+- 从左侧**拖拽**组件到画布，带虚线预览
+- 画布支持网格吸附、对齐辅助线
+- 右侧属性面板实时编辑 id / 坐标 / 尺寸 / 文案 / 选项
+- 一键「生成代码」插入编辑器，或「运行预览」立即看到效果
+- 「从编辑器导入」把已有代码反向解析回画布
+- 小智生成的界面代码也能双击「载入设计器」继续调整
+
+### 组件与 API
+
+| 组件 | 函数 |
+|---|---|
+| 标题 / 标签 / 按钮 | `uiheading` / `uilabel` / `uibtn` |
+| 输入框 / 多行文本 | `uiinput` / `uitext` |
+| 勾选框 / 单选组 / 下拉框 / 列表框 | `uicheck` / `uiradio` / `uicombo` / `uilist` |
+| 滑块 / 进度条 | `uirange` / `uiprogress` |
+| 图片 / 表格 | `uiimage` / `uitable` |
+| 面板 / 分割线 / 标签页 | `uipanel` / `uiseparator` / `uitabs` |
+
+统一签名：`(id, x, y, 宽, 高, ...)`。事件用 `uion(id, "click", fn)` 绑定，`uiget` / `uiset` 读写值，`uirun()` 启动。
+
+## 搜索
+
+活动栏的搜索图标支持跨文件全文搜索：
+
+- 输入即搜（≥2 字符）或回车触发
+- 区分大小写 / 全词匹配可切换
+- 结果按文件分组，显示行号与上下文
+- 点击任意结果跳转到对应位置并高亮
+
 ## HX Studio 界面
 
 界面布局仿照 VS Code：
