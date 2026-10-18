@@ -1,7 +1,7 @@
 # MiniLang v2 —— 解释器 + Tkinter 编码器
 # 语法：x = 1;  f(a,b){...}  if/else if/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
-import sys, re, os, math, json, threading, queue, time
+import sys, re, os, math, json, threading, queue, time, subprocess, webbrowser
 import urllib.request, urllib.error
 
 KEYWORDS = {"let","dar","if","else","elif","while","for","break","continue","del",
@@ -378,6 +378,7 @@ class Interp:
         self.globals=Env(); self.env=self.globals
         self.outbuf=[]; self.steps=0; self.maxsteps=300000; self.trace=[]; self.ask_fn=None
         self.root=root; self.gwin=None; self.gcanvas=None; self._owns_gwin=False
+        self._wait_key=None; self._wait_click=None; self._cb_errors=[]
         g=self.globals
         g.define("dar",Native(lambda a: typename(a[0])))
         g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
@@ -416,6 +417,18 @@ class Interp:
         g.define("gtext",Native(self.g_text))
         g.define("gclear",Native(self.g_clear))
         g.define("gsleep",Native(self.g_sleep))
+        g.define("gwaitkey",Native(self.g_waitkey))
+        g.define("gwaitclick",Native(self.g_waitclick))
+        g.define("gkeydown",Native(self.g_keydown))
+        g.define("gclick",Native(self.g_click))
+        g.define("readfile",Native(self.f_readfile))
+        g.define("writefile",Native(self.f_writefile))
+        g.define("appendfile",Native(self.f_appendfile))
+        g.define("exists",Native(self.f_exists))
+        g.define("files",Native(self.f_files))
+        g.define("openfile",Native(self.f_openfile))
+        g.define("openurl",Native(self.f_openurl))
+        g.define("runapp",Native(self.f_runapp))
 
     def ask(self):
         if self.ask_fn: return self.ask_fn()
@@ -458,7 +471,7 @@ class Interp:
             self.gwin.title(title)
             self.gwin.configure(bg="white")
             self.gwin.geometry("%dx%d"%(w,h))
-            self.gcanvas = tk.Canvas(self.gwin,width=w,height=h,bg="white",highlightthickness=0)
+            self.gcanvas = tk.Canvas(self.gwin,width=w,height=h,bg="white",highlightthickness=0,takefocus=1)
             self.gcanvas.pack(fill="both",expand=True)
             self.gwin.update()
         except Exception as e:
@@ -526,6 +539,203 @@ class Interp:
             if self.gwin is not None: self.gwin.update()
         except Exception:
             time.sleep(max(0, ms)/1000.0)
+        self._check_cb_errors()
+        return None
+
+    def _key_name(self, e):
+        k = e.keysym
+        if k == "space": return "space"
+        if k == "Return": return "enter"
+        if k == "Escape": return "esc"
+        if k == "BackSpace": return "backspace"
+        if k == "Tab": return "tab"
+        if len(k) == 1 and e.state & 0x1:
+            return k.lower()
+        return k if len(k) > 1 else k.lower()
+
+    def _check_cb_errors(self):
+        if self._cb_errors:
+            msg = self._cb_errors[0]
+            self._cb_errors.clear()
+            raise MiniError(msg)
+
+    def g_waitkey(self, args):
+        if self.gwin is None:
+            raise MiniError("gwaitkey 需要先调用 gwin(宽, 高) 创建图形窗口")
+        timeout = None
+        if args:
+            timeout = self._g_num(args[0], "gwaitkey", "超时毫秒")
+        self._wait_key = None
+        def on_key(e):
+            self._wait_key = self._key_name(e)
+        bid1 = self.gwin.bind("<KeyPress>", on_key)
+        bid2 = None
+        if self.gcanvas is not None:
+            bid2 = self.gcanvas.bind("<KeyPress>", on_key)
+        try:
+            self.gwin.lift()
+            self.gwin.focus_force()
+            start = time.time()
+            last_focus = 0
+            while self._wait_key is None:
+                self.gwin.update()
+                now = time.time()
+                if now - last_focus > 0.5:
+                    try: self.gwin.focus_force()
+                    except Exception: pass
+                    last_focus = now
+                time.sleep(0.01)
+                if timeout is not None and (time.time() - start) * 1000 >= timeout:
+                    return ""
+        finally:
+            try: self.gwin.unbind("<KeyPress>", bid1)
+            except Exception: pass
+            if bid2 is not None and self.gcanvas is not None:
+                try: self.gcanvas.unbind("<KeyPress>", bid2)
+                except Exception: pass
+        return self._wait_key
+
+    def g_waitclick(self, args):
+        c = self.g_canvas()
+        timeout = None
+        if args:
+            timeout = self._g_num(args[0], "gwaitclick", "超时毫秒")
+        self._wait_click = None
+        def on_click(e):
+            self._wait_click = [float(e.x), float(e.y)]
+        bid = c.bind("<Button-1>", on_click)
+        try:
+            self.gwin.lift()
+            start = time.time()
+            while self._wait_click is None:
+                self.gwin.update()
+                time.sleep(0.01)
+                if timeout is not None and (time.time() - start) * 1000 >= timeout:
+                    return []
+        finally:
+            try: c.unbind("<Button-1>", bid)
+            except Exception: pass
+        return self._wait_click
+
+    def _need_fn(self, args, fname):
+        if not args:
+            raise MiniError(fname + " 需要一个函数参数")
+        fn = args[0]
+        if not isinstance(fn, (Fn, Native)):
+            raise MiniError(fname + " 的参数必须是函数，得到：" + fmt(fn))
+        return fn
+
+    def g_keydown(self, args):
+        fn = self._need_fn(args, "gkeydown")
+        if self.gwin is None:
+            raise MiniError("gkeydown 需要先调用 gwin(宽, 高) 创建图形窗口")
+        def handler(e):
+            try:
+                self.call(fn, [self._key_name(e)], 0)
+            except Exception as ex:
+                self._cb_errors.append(str(ex))
+        self.gwin.bind("<KeyPress>", handler)
+        self.gwin.focus_force()
+        return None
+
+    def g_click(self, args):
+        fn = self._need_fn(args, "gclick")
+        c = self.g_canvas()
+        def handler(e):
+            try:
+                self.call(fn, [float(e.x), float(e.y)], 0)
+            except Exception as ex:
+                self._cb_errors.append(str(ex))
+        c.bind("<Button-1>", handler)
+        return None
+
+    def _f_path(self, v, fname):
+        if not isinstance(v, str):
+            raise MiniError(fname + " 的路径必须是字符串，得到：" + fmt(v))
+        return v
+
+    def f_readfile(self, args):
+        if len(args) < 1:
+            raise MiniError("readfile 需要 1 个参数：文件路径")
+        p = self._f_path(args[0], "readfile")
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            raise MiniError("readfile 失败：文件不存在 " + p)
+        except Exception as e:
+            raise MiniError("readfile 失败：" + str(e))
+
+    def _write_common(self, args, fname, mode):
+        if len(args) < 2:
+            raise MiniError(fname + " 需要 2 个参数：路径, 内容")
+        p = self._f_path(args[0], fname)
+        content = fmt(args[1])
+        try:
+            d = os.path.dirname(os.path.abspath(p))
+            if d and not os.path.isdir(d):
+                os.makedirs(d, exist_ok=True)
+            with open(p, mode, encoding="utf-8") as f:
+                f.write(content)
+            return None
+        except Exception as e:
+            raise MiniError(fname + " 失败：" + str(e))
+
+    def f_writefile(self, args):
+        return self._write_common(args, "writefile", "w")
+
+    def f_appendfile(self, args):
+        return self._write_common(args, "appendfile", "a")
+
+    def f_exists(self, args):
+        if len(args) < 1:
+            raise MiniError("exists 需要 1 个参数：路径")
+        p = self._f_path(args[0], "exists")
+        return bool(os.path.exists(p))
+
+    def f_files(self, args):
+        p = self._f_path(args[0], "files") if args else "."
+        try:
+            return sorted(os.listdir(p))
+        except FileNotFoundError:
+            raise MiniError("files 失败：目录不存在 " + p)
+        except Exception as e:
+            raise MiniError("files 失败：" + str(e))
+
+    def f_openfile(self, args):
+        if len(args) < 1:
+            raise MiniError("openfile 需要 1 个参数：文件路径")
+        p = self._f_path(args[0], "openfile")
+        if not os.path.exists(p):
+            raise MiniError("openfile 失败：文件不存在 " + p)
+        try:
+            os.startfile(p)
+        except AttributeError:
+            raise MiniError("openfile 目前只支持 Windows 系统")
+        except Exception as e:
+            raise MiniError("openfile 失败：" + str(e))
+        return None
+
+    def f_openurl(self, args):
+        if len(args) < 1:
+            raise MiniError("openurl 需要 1 个参数：网址")
+        url = self._f_path(args[0], "openurl")
+        if not (url.startswith("http://") or url.startswith("https://")):
+            raise MiniError("openurl 的网址必须以 http:// 或 https:// 开头")
+        try:
+            webbrowser.open(url)
+        except Exception as e:
+            raise MiniError("openurl 失败：" + str(e))
+        return None
+
+    def f_runapp(self, args):
+        if len(args) < 1:
+            raise MiniError("runapp 需要 1 个参数：程序名或命令")
+        cmd = self._f_path(args[0], "runapp")
+        try:
+            subprocess.Popen(cmd, shell=True)
+        except Exception as e:
+            raise MiniError("runapp 失败：" + str(e))
         return None
 
     def close_gwin(self):
@@ -790,10 +1000,27 @@ CHEATSHEET = {
   "gclear();                清空画面",
   "gsleep(500);             暂停 500 毫秒并刷新（做动画）",
 ],
+"交互": [
+  "k = gwaitkey();          等待按键，返回键名（如 \"a\", \"space\", \"enter\"）",
+  "k = gwaitkey(3000);      最多等 3 秒，超时返回空字符串",
+  "p = gwaitclick();        等待鼠标点击，返回 [x, y]",
+  "gkeydown(on_key);        按键回调，函数收到键名参数",
+  "gclick(on_click);        点击回调，函数收到 x, y 参数",
+],
+"文件与系统": [
+  'readfile("a.txt")        读取整个文件（UTF-8）',
+  'writefile("a.txt", s)    写入文件（覆盖）',
+  'appendfile("a.txt", s)   追加到文件末尾',
+  'exists("a.txt")          判断文件/目录是否存在',
+  'files(".")               列出目录内容，返回数组',
+  'openfile("a.txt")        用系统默认程序打开文件',
+  'openurl("https://...")   用默认浏览器打开网址',
+  'runapp("notepad.exe")    启动外部程序',
+],
 "注释": ["# 这一行是注释"],
 }
 
-CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","图形","注释"]
+CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","图形","交互","文件与系统","注释"]
 
 def cheatsheet_text():
     lines = []
@@ -892,6 +1119,10 @@ AI_SYSTEM_PROMPT = (
     "- 内置：dar(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
     "- 图形：gwin(w,h,title) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
     "gcircle(cx,cy,r,color,fill)、gtext(x,y,text,color)、gclear()、gsleep(ms) 刷新并暂停\n"
+    "- 交互：gwaitkey() 等按键返回键名、gwaitclick() 等点击返回 [x,y]、"
+    "gkeydown(fn) 按键回调、gclick(fn) 点击回调\n"
+    "- 文件：readfile(p)、writefile(p,s)、appendfile(p,s)、exists(p)、files(dir)\n"
+    "- 系统：openfile(p) 打开文件、openurl(u) 开浏览器、runapp(cmd) 启程序\n"
     "- 注释用 #，语句末尾分号可省\n\n"
     "回答要简洁、直接给可运行的 HX 代码，用 " + FENCE + "hxg 代码块包裹。"
 )

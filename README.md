@@ -139,6 +139,55 @@ gsleep(500);                             # 刷新并暂停
 
 完整示例见 `graphics.hxg`。
 
+## 交互与系统能力
+
+### 鼠标键盘事件
+
+```hx
+gwin(400, 300, "按键演示");
+
+# 阻塞式：等待按键，超时返回空字符串
+k = gwaitkey(3000);
+if (k != "") { print("你按了:", k); }
+
+# 阻塞式：等待点击，返回 [x, y]
+p = gwaitclick(3000);
+if (len(p) > 0) { print("点击位置:", p[0], p[1]); }
+
+# 回调式：适合游戏/动画
+on_key(key) { print("按键:", key); }
+gkeydown(on_key);
+
+on_click(x, y) { gcircle(x, y, 10, "red", "red"); }
+gclick(on_click);
+```
+
+键名：字母/数字为自身，特殊键为 `space` `enter` `esc` `backspace` `tab` `Up` `Down` 等。
+
+### 文件读写
+
+```hx
+writefile("out.txt", "你好\n");
+appendfile("out.txt", "追加一行\n");
+s = readfile("out.txt");
+print(s);
+
+if (exists("out.txt")) {
+  print("文件存在");
+}
+
+列表 = files(".");
+for (i = 0; i < len(列表); i += 1) { print(列表[i]); }
+```
+
+### 打开文件与程序
+
+```hx
+openfile("out.txt");              # 用默认程序打开
+openurl("https://example.com");   # 用浏览器打开
+runapp("notepad.exe");            # 启动程序
+```
+
 ## 内置 AI 助手「小智」
 
 编辑器右侧内置了 AI 编程向导「小智」，帮助你在 HX 语言的世界里闯荡。
