@@ -69,6 +69,11 @@ for (i = 0; i < len(arr); i += 1) {
   print(arr[i]);
 }
 
+# 逻辑运算（符号写法，也支持 and / or / not）
+if (x > 0 && x < 10) { print("个位数"); }
+if (x < 0 || x > 100) { print("超出范围"); }
+if (!found) { print("没找到"); }
+
 # 异常
 try {
   print(undefined_var);
@@ -86,7 +91,7 @@ print("x = ${x}, x+1 = ${x + 1}");
 
 | 类别 | 函数 |
 |---|---|
-| 类型 | `dar(x)` 查询类型 |
+| 类型 | `type(x)` 查询类型 |
 | 输出 | `print(...)` `input(prompt)` `help()` |
 | 数组 | `len` `push` `min` `max` `range` `abs` |
 | 字典 | `keys` `items` `has` `set` |
