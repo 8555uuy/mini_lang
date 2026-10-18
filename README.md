@@ -1,30 +1,27 @@
-# MiniLang / HX 语言
+# HX 语言
 
-一个用 Python 实现的迷你脚本语言解释器，附带 VS Code 风格的集成开发环境（HX Studio）。
+一个用 Python 实现的迷你脚本语言解释器，单文件 `hx.py`，零依赖（图形界面需要 tkinter / PyQt5）。
 
 ## 特性
 
-- **自动类型推断**：直接写 `x = 10;` 即可，无需声明类型
-- **带括号的控制流**：`if (...)` / `else if (...)` / `while (...)` / `for (...)`
-- **C 式 for 循环**：`for (i = 0; i < n; i += 1)`，三段均可省略
-- **异常处理**：`try { ... } catch (e) { ... }`
-- **字符串插值**：`"hi ${x}!"`
-- **丰富数据结构**：数组、字典、函数、闭包
-- **内置图形绘制**：`gwin` / `gline` / `grect` / `gcircle` / `gtext`，用代码画图
-- **HX Studio 编辑器**：VS Code 风格界面（菜单栏 / 活动栏 / 资源管理器 / 标签页 / 面包屑 / 状态栏）
-- **开发辅助**：语法高亮、行号、错误红色波浪线、单步调试、变量观察、问题面板
+- **自动类型推断**：直接写 `x = 10;`，无需声明类型
+- **C 风格函数**：`add(a, b) { return a + b; }`
+- **带括号的控制流**：`if (...) { }` / `while (...) { }` / `for (...; ...; ...) { }`
+- **异常处理**：`try { } catch (e) { }`
+- **数据结构**：数组、字典、函数（支持递归）
+- **丰富内置函数**：字符串、数学、数组、字典操作
+- **格式输入**：`scanf("%d %d", a, b)`
+- **图形绘制**：`gwin` / `gline` / `grect` / `gcircle` / `gtext`
+- **鼠标键盘事件**：`gwaitkey` / `gwaitclick` / `gkeydown` / `gclick`
+- **界面组件**：16 种 UI 控件（`uiwin` / `uibtn` / `uiinput` …），基于 PyQt5
+- **文件与系统**：`readfile` / `writefile` / `openurl` / `runapp`
+- **网络**：`http_get` / `http_download`，支持后台异步 `bg_run`
+- **压缩与哈希**：`md5` / `sha256` / `unzip` / `zipinfo`
 
 ## 快速开始
 
 ```bash
-# 命令行运行
 python hx.py demo.hxg
-
-# 打开 HX Studio
-python hx.py
-
-# 用 Studio 打开指定文件
-python hx.py --edit demo.hxg
 ```
 
 ## 语法速览
@@ -36,7 +33,7 @@ s = "hello";
 arr = [1, 2, 3];
 d = {name: "hx", ver: 3};
 
-# 函数（C 风格）
+# 函数
 fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
@@ -53,26 +50,20 @@ if (x > 5) {
   print("zero or negative");
 }
 
-# while
+# 循环
+for (i = 0; i < len(arr); i += 1) {
+  print(arr[i]);
+}
+
 i = 0;
 while (i < 3) {
   print("i =", i);
   i += 1;
 }
 
-# 遍历字典的键
-ks = keys(d);
-for (i = 0; i < len(ks); i += 1) { print(ks[i]); }
-
-# for - C 式三段
-for (i = 0; i < len(arr); i += 1) {
-  print(arr[i]);
-}
-
-# 逻辑运算（符号写法，也支持 and / or / not）
+# 逻辑运算（也支持 and / or / not）
 if (x > 0 && x < 10) { print("个位数"); }
 if (x < 0 || x > 100) { print("超出范围"); }
-if (!found) { print("没找到"); }
 
 # 异常
 try {
@@ -80,9 +71,6 @@ try {
 } catch (e) {
   print("error:", e);
 }
-
-# 字符串插值
-print("x = ${x}, x+1 = ${x + 1}");
 ```
 
 程序内运行 `help()` 可随时查看完整语法速查。
@@ -91,96 +79,34 @@ print("x = ${x}, x+1 = ${x + 1}");
 
 | 类别 | 函数 |
 |---|---|
-| 类型 | `type(x)` 查询类型 |
-| 输出 | `print(...)` `input(prompt)` `help()` |
-| 数组 | `len` `push` `min` `max` `range` `abs` |
+| 类型 | `type(x)` |
+| 输出输入 | `print(...)` `input(prompt)` `scanf(fmt, vars...)` `help()` |
+| 数组 | `len` `push` `min` `max` `abs` `range` |
 | 字典 | `keys` `items` `has` `set` |
 | 字符串 | `upper` `lower` `trim` `split` `join` |
 | 转换 | `str` `num` |
 | 数学 | `sqrt` `sin` `cos` `tan` `floor` `ceil` `round` `random` `PI` |
 | 图形 | `gwin` `gline` `grect` `gcircle` `gtext` `gclear` `gsleep` |
-
-## 文件关联（可选）
-
-运行以下命令后，双击任意 `.hxg` 文件将用编码器打开（仅当前用户，无需管理员）：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File register_filetype.ps1
-```
-
-撤销：`unregister_filetype.ps1`
-
-图标文件 `hx.ico` 由 `make_icon.py` 生成（需要 Pillow）。
-
-## UI 设计器
-
-按 `Ctrl+U` 打开可视化界面设计器：
-
-- **16 种组件**，按「基础 / 输入 / 显示 / 布局」分组
-- 从左侧**拖拽**组件到画布，带虚线预览
-- 画布支持网格吸附、对齐辅助线
-- 右侧属性面板实时编辑 id / 坐标 / 尺寸 / 文案 / 选项
-- 一键「生成代码」插入编辑器，或「运行预览」立即看到效果
-- 「从编辑器导入」把已有代码反向解析回画布
-- 小智生成的界面代码也能双击「载入设计器」继续调整
-
-### 组件与 API
-
-| 组件 | 函数 |
-|---|---|
-| 标题 / 标签 / 按钮 | `uiheading` / `uilabel` / `uibtn` |
-| 输入框 / 多行文本 | `uiinput` / `uitext` |
-| 勾选框 / 单选组 / 下拉框 / 列表框 | `uicheck` / `uiradio` / `uicombo` / `uilist` |
-| 滑块 / 进度条 | `uirange` / `uiprogress` |
-| 图片 / 表格 | `uiimage` / `uitable` |
-| 面板 / 分割线 / 标签页 | `uipanel` / `uiseparator` / `uitabs` |
-
-统一签名：`(id, x, y, 宽, 高, ...)`。事件用 `uion(id, "click", fn)` 绑定，`uiget` / `uiset` 读写值，`uirun()` 启动。
-
-## 搜索
-
-活动栏的搜索图标支持跨文件全文搜索：
-
-- 输入即搜（≥2 字符）或回车触发
-- 区分大小写 / 全词匹配可切换
-- 结果按文件分组，显示行号与上下文
-- 点击任意结果跳转到对应位置并高亮
-
-## HX Studio 界面
-
-界面布局仿照 VS Code：
-
-| 区域 | 说明 |
-|---|---|
-| 菜单栏 | 文件 / 编辑 / 运行 / 视图 / 帮助 |
-| 活动栏 | 资源管理器、搜索、小智、设置 |
-| 侧边栏 | 项目内 `.hxg` 文件列表，点击打开 |
-| 标签页 | 当前文件名 + 关闭按钮 |
-| 面包屑 | 显示文件所在路径 |
-| 底部面板 | 输出 / 变量 / 问题 三标签切换 |
-| 状态栏 | 分支、错误数、光标位置、编码、语言 |
-| 右侧 | 小智 AI 助手 |
-
-快捷键：`F5` 运行、`F10` 单步、`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+N` 新建、`Ctrl+B` 切换侧边栏。
+| 事件 | `gwaitkey` `gwaitclick` `gkeydown` `gclick` |
+| 文件系统 | `readfile` `writefile` `appendfile` `exists` `files` `openfile` `openurl` `runapp` |
+| 网络 | `http_get` `http_download` |
+| 后台 | `bg_run(fn, args..., callback)` |
+| 压缩哈希 | `md5` `sha256` `unzip` `zipinfo` |
 
 ## 图形绘制
 
-用代码画图，无需额外依赖（基于 tkinter）：
-
 ```hx
-gwin(600, 400);                          # 创建窗口
+gwin(600, 400, "我的画板");
 grect(0, 0, 600, 400, "white", "lightcyan");
-gcircle(300, 200, 80, "orange", "gold"); # 圆
-gline(50, 350, 550, 350, "blue", 3);     # 线
-gtext(250, 50, "Hello!", "navy");        # 文字
-gsleep(500);                             # 刷新并暂停
+gcircle(300, 200, 80, "orange", "gold");
+gline(50, 350, 550, 350, "blue", 3);
+gtext(250, 50, "Hello!", "navy");
+gsleep(2000);
 ```
 
 完整示例见 `graphics.hxg`。
 
-## 交互与系统能力
-
-### 鼠标键盘事件
+## 事件处理
 
 ```hx
 gwin(400, 300, "按键演示");
@@ -196,56 +122,71 @@ if (len(p) > 0) { print("点击位置:", p[0], p[1]); }
 # 回调式：适合游戏/动画
 on_key(key) { print("按键:", key); }
 gkeydown(on_key);
-
-on_click(x, y) { gcircle(x, y, 10, "red", "red"); }
-gclick(on_click);
 ```
 
-键名：字母/数字为自身，特殊键为 `space` `enter` `esc` `backspace` `tab` `Up` `Down` 等。
+完整示例见 `snake.hxg`（贪吃蛇小游戏）。
 
-### 文件读写
+## 界面组件
+
+16 种控件，统一签名 `(id, x, y, 宽, 高, ...)`：
+
+| 组件 | 函数 |
+|---|---|
+| 标题 / 标签 / 按钮 | `uiheading` / `uilabel` / `uibtn` |
+| 输入框 / 多行文本 | `uiinput` / `uitext` |
+| 勾选框 / 单选组 / 下拉框 / 列表框 | `uicheck` / `uiradio` / `uicombo` / `uilist` |
+| 滑块 / 进度条 | `uirange` / `uiprogress` |
+| 图片 / 表格 | `uiimage` / `uitable` |
+| 面板 / 分割线 / 标签页 | `uipanel` / `uiseparator` / `uitabs` |
+
+事件用 `uion(id, "click", fn)` 绑定，`uiget` / `uiset` 读写值，`uirun()` 启动。
 
 ```hx
-writefile("out.txt", "你好\n");
-appendfile("out.txt", "追加一行\n");
-s = readfile("out.txt");
-print(s);
+uiwin(400, 300, "登录");
+uilabel("lb", 20, 20, 80, 26, "用户名：");
+uiinput("inp", 100, 20, 260, 28);
+uibtn("ok", 20, 70, 100, 32, "登录");
+uilabel("res", 20, 120, 360, 26, "");
 
-if (exists("out.txt")) {
-  print("文件存在");
+on_login() {
+  if (uiget("inp") == "admin") {
+    uiset("res", "登录成功");
+  } else {
+    uiset("res", "用户名错误");
+  }
 }
-
-列表 = files(".");
-for (i = 0; i < len(列表); i += 1) { print(列表[i]); }
+uion("ok", "click", on_login);
+uirun();
 ```
 
-### 打开文件与程序
+## 后台任务
+
+`bg_run` 在后台线程执行内置 IO 函数，完成后在主线程调用回调（回调里可以安全操作 UI）：
 
 ```hx
-openfile("out.txt");              # 用默认程序打开
-openurl("https://example.com");   # 用浏览器打开
-runapp("notepad.exe");            # 启动程序
+on_done(text) {
+  uiset("status", "收到 " + len(text) + " 字节");
+}
+bg_run(http_get, "https://example.com", on_done);
+uirun();
 ```
 
-## 内置 AI 助手「小智」
+**限制**：`bg_run` 只接受内置 IO 函数（`http_get` / `readfile` / `md5` 等），不能传入用户自定义函数——后台线程无法安全访问解释器状态。
 
-编辑器右侧内置了 AI 编程向导「小智」，帮助你在 HX 语言的世界里闯荡。
+## 示例文件
 
-- 点击右上角 ⚙ 配置 API（支持 DeepSeek / Kimi / 通义 / 智谱 / Ollama 等 OpenAI 兼容服务）
-- 配置保存在 `%APPDATA%\HXLanguage\config.json`
-- 默认勾选「附带当前代码」，小智能直接看到你正在写的程序
-- 回复**流式输出**，逐字显示，不用等全部生成完
-- 小智返回的代码块可双击下方「📋 双击此处插入代码」一键插入编辑器
+| 文件 | 内容 |
+|---|---|
+| `demo.hxg` | 基础语法综合演示 |
+| `t.hxg` | 数据结构操作 |
+| `f4.hxg` | 异常处理 |
+| `auto.hxg` | 内置函数 |
+| `graphics.hxg` | 图形绘制 |
+| `snake.hxg` | 贪吃蛇游戏（按键事件） |
 
 ## 项目结构
 
 ```
-hx.py                    解释器 + Tkinter 图形编码器（含小智 AI 助手）
-demo.hxg / t.hxg / f4.hxg / auto.hxg   示例程序
-graphics.hxg             图形绘制示例
-snake.hxg                贪吃蛇小游戏（演示按键事件）
-hx.ico                   .hxg 文件图标
-make_icon.py             图标生成脚本
-register_filetype.ps1    Windows 文件关联注册
-unregister_filetype.ps1  撤销文件关联
+hx.py          解释器（词法、语法、求值、内置函数、图形、UI、网络）
+*.hxg          示例程序
 ```
