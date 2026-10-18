@@ -3950,6 +3950,14 @@ def build_gui(initial_path=None):
 
 if __name__=="__main__":
     args=sys.argv[1:]
+    # PyQt5 版 IDE（实验）：python hx.py --ide-qt [文件]
+    if args and args[0] in ("--ide-qt", "--qt"):
+        try: import hx_ide_qt
+        except ImportError as e:
+            sys.stderr.write("找不到 hx_ide_qt.py：" + str(e) + "\n"); sys.exit(1)
+        p = args[1] if len(args) > 1 else None
+        hx_ide_qt.build_gui_qt(p)
+        sys.exit(0)
     edit_path=None
     if "--edit" in args:
         i=args.index("--edit")
