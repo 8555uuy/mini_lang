@@ -19,6 +19,8 @@ include = [
     "out/api-docs.js",
     "out/api-tree.js",
     "out/cheatsheet.js",
+    "out/python-finder.js",
+    "out/settings-panel.js",
     "out/agent/panel.js",
     "out/agent/chat.js",
     "out/designer/panel.js",

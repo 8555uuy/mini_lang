@@ -63,7 +63,8 @@ export class DiagnosticsManager {
     private check(doc: vscode.TextDocument) {
         const py = path.join(this.context.extensionPath, 'python', 'hx_check.py');
         const cfg = vscode.workspace.getConfiguration('hx');
-        const python = cfg.get<string>('pythonPath') || 'python';
+        const { findPython } = require('./python-finder');
+        const python = findPython(cfg.get<string>('pythonPath') || 'python');
         const src = doc.getText();
 
         const proc = cp.spawn(python, [py], {

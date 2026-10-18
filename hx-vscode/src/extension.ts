@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { findPython } from './python-finder';
 
 let agentPanel: any = undefined;
 let chatChannel: any = undefined;
@@ -150,7 +151,21 @@ export function activate(context: vscode.ExtensionContext) {
         );
     });
 
-    // ========== API Key ==========
+    // ========== 设置面板 ==========
+    safe('registerCommand hx.openSettings', () => {
+        context.subscriptions.push(
+            vscode.commands.registerCommand('hx.openSettings', async () => {
+                try {
+                    const mod = require('./settings-panel');
+                    await mod.openSettings(context);
+                } catch (e: any) {
+                    vscode.window.showErrorMessage('设置面板打开失败：' + (e.message || String(e)));
+                }
+            })
+        );
+    });
+
+    // ========== API Key（保留兼容） ==========
     safe('registerCommand hx.setApiKey', () => {
         context.subscriptions.push(
             vscode.commands.registerCommand('hx.setApiKey', async () => {

@@ -10,7 +10,8 @@ let currentTerminal: vscode.Terminal | undefined;
  */
 export function runFile(filePath: string, interpreterPath: string) {
     const cfg = vscode.workspace.getConfiguration('hx');
-    const python = cfg.get<string>('pythonPath') || 'python';
+    const { findPython } = require('./python-finder');
+    const python = findPython(cfg.get<string>('pythonPath') || 'python');
     const workDir = path.dirname(filePath);
     const fileName = path.basename(filePath);
 
@@ -51,7 +52,8 @@ export function runFile(filePath: string, interpreterPath: string) {
 export function runFileCapture(filePath: string, interpreterPath: string): Promise<{ code: number; stdout: string; stderr: string }> {
     return new Promise((resolve) => {
         const cfg = vscode.workspace.getConfiguration('hx');
-        const python = cfg.get<string>('pythonPath') || 'python';
+        const { findPython } = require('./python-finder');
+        const python = findPython(cfg.get<string>('pythonPath') || 'python');
         cp.execFile(python, [interpreterPath, filePath], {
             cwd: path.dirname(filePath),
             timeout: 60000,
