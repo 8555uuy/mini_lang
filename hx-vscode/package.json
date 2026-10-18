@@ -64,6 +64,24 @@
         "title": "HX: 语法速查"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "hx-sidebar",
+          "title": "HX",
+          "icon": "media/hx-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "hx-sidebar": [
+        {
+          "id": "hx.apiDocs",
+          "name": "API 速查",
+          "icon": "media/hx-icon.svg"
+        }
+      ]
+    },
     "menus": {
       "editor/title": [
         {

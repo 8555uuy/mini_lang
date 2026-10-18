@@ -6,6 +6,7 @@ include = [
     "package.json",
     "language-configuration.json",
     "README.md",
+    "media/hx-icon.svg",
     "syntaxes/hx.tmLanguage.json",
     "snippets/hx.json",
     "python/hx.py",
@@ -15,10 +16,12 @@ include = [
     "out/runner.js",
     "out/diagnostics.js",
     "out/symbols.js",
+    "out/api-docs.js",
+    "out/api-docs-view.js",
     "out/agent/panel.js",
     "out/designer/panel.js",
 ]
-ct = '<?xml version="1.0" encoding="utf-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".json" ContentType="application/json"/><Default Extension=".js" ContentType="application/javascript"/><Default Extension=".py" ContentType="text/plain"/><Default Extension=".md" ContentType="text/markdown"/><Default Extension=".vsixmanifest" ContentType="text/xml"/></Types>'
+ct = '<?xml version="1.0" encoding="utf-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".json" ContentType="application/json"/><Default Extension=".js" ContentType="application/javascript"/><Default Extension=".py" ContentType="text/plain"/><Default Extension=".md" ContentType="text/markdown"/><Default Extension=".svg" ContentType="image/svg+xml"/><Default Extension=".vsixmanifest" ContentType="text/xml"/></Types>'
 pkg = json.load(open(os.path.join(root, "package.json"), encoding="utf-8"))
 manifest = '<?xml version="1.0" encoding="utf-8"?><PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011"><Metadata><Identity Language="en-US" Id="%s" Version="%s" Publisher="%s"/><DisplayName>%s</DisplayName><Description xml:space="preserve">%s</Description><Categories>%s</Categories><Properties><Property Id="Microsoft.VisualStudio.Code.Engine" Value="%s"/></Properties></Metadata><Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation><Dependencies/><Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets></PackageManifest>' % (pkg["name"], pkg["version"], pkg["publisher"], pkg.get("displayName", pkg["name"]), pkg.get("description", ""), "|".join(pkg.get("categories", [])), pkg["engines"]["vscode"])
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:

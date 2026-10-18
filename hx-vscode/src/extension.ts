@@ -7,6 +7,7 @@ import { DesignerPanel } from './designer/panel';
 import { HxCompletionProvider, HxHoverProvider } from './providers';
 import { DiagnosticsManager } from './diagnostics';
 import { HxDocumentSymbolProvider } from './symbols';
+import { ApiDocsProvider } from './api-docs-view';
 
 let agentPanel: AgentPanel | undefined;
 let designerPanel: DesignerPanel | undefined;
@@ -143,6 +144,13 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(d);
     }
     context.subscriptions.push({ dispose: () => diagMgr.dispose() });
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(
+            ApiDocsProvider.viewType,
+            new ApiDocsProvider(context.extensionUri)
+        )
+    );
 
     const statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusItem.text = '$(sparkle) 小智';
