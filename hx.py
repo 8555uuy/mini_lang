@@ -389,6 +389,7 @@ class Interp:
         self.outbuf=[]; self.steps=0; self.maxsteps=300000; self.trace=[]; self.ask_fn=None
         self.root=root; self.gwin=None; self.gcanvas=None; self._owns_gwin=False
         self._wait_key=None; self._wait_click=None; self._cb_errors=[]
+        self.ui_win_obj=None; self.ui_widgets={}; self.ui_handlers={}; self.ui_running=False
         g=self.globals
         g.define("type",Native(lambda a: typename(a[0])))
         g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
@@ -439,6 +440,19 @@ class Interp:
         g.define("openfile",Native(self.f_openfile))
         g.define("openurl",Native(self.f_openurl))
         g.define("runapp",Native(self.f_runapp))
+        g.define("uiwin",Native(self.ui_win))
+        g.define("uibtn",Native(self.ui_btn))
+        g.define("uilabel",Native(self.ui_label))
+        g.define("uiinput",Native(self.ui_input))
+        g.define("uitext",Native(self.ui_text))
+        g.define("uicheck",Native(self.ui_check))
+        g.define("uilist",Native(self.ui_list))
+        g.define("uirange",Native(self.ui_range))
+        g.define("uiprogress",Native(self.ui_progress))
+        g.define("uion",Native(self.ui_on))
+        g.define("uiget",Native(self.ui_get))
+        g.define("uiset",Native(self.ui_set))
+        g.define("uirun",Native(self.ui_run))
 
     def ask(self):
         if self.ask_fn: return self.ask_fn()
@@ -818,6 +832,315 @@ class Interp:
             raise MiniError("runapp 失败：" + str(e))
         return None
 
+    # ===== UI 运行时 =====
+    def _ui_need_win(self, fname):
+        if self.ui_win_obj is None:
+            raise MiniError(fname + " 需要先调用 uiwin(宽, 高, 标题)")
+
+    def _ui_args_num(self, args, idx, fname, pname):
+        if idx >= len(args):
+            raise MiniError(fname + " 缺少参数 " + pname)
+        return self._g_num(args[idx], fname, pname)
+
+    def _ui_id(self, args, fname):
+        if not args or not isinstance(args[0], str):
+            raise MiniError(fname + " 的第一个参数必须是组件 id（字符串）")
+        return args[0]
+
+    def _ui_tk(self):
+        import tkinter as tk
+        return tk
+
+    def ui_win(self, args):
+        tk = self._ui_tk()
+        if len(args) < 3:
+            raise MiniError("uiwin 需要 3 个参数：宽, 高, 标题")
+        w = int(self._ui_args_num(args, 0, "uiwin", "宽"))
+        h = int(self._ui_args_num(args, 1, "uiwin", "高"))
+        title = str(args[2])
+        if w <= 0 or h <= 0:
+            raise MiniError("uiwin 的宽和高必须大于 0")
+        if self.ui_win_obj is not None:
+            try: self.ui_win_obj.destroy()
+            except Exception: pass
+        self.ui_widgets = {}
+        self.ui_handlers = {}
+        try:
+            if self.root is not None:
+                self.ui_win_obj = tk.Toplevel(self.root)
+            else:
+                self.ui_win_obj = tk.Tk()
+            self.ui_win_obj.title(title)
+            self.ui_win_obj.geometry("%dx%d" % (w, h))
+            self.ui_win_obj.configure(bg="#f0f0f0")
+            self.ui_win_obj.update()
+        except Exception as e:
+            raise MiniError("uiwin 创建窗口失败：" + str(e))
+        return None
+
+    def _ui_place(self, args, fname):
+        x = self._ui_args_num(args, 1, fname, "x")
+        y = self._ui_args_num(args, 2, fname, "y")
+        w = self._ui_args_num(args, 3, fname, "宽")
+        h = self._ui_args_num(args, 4, fname, "高")
+        return int(x), int(y), int(w), int(h)
+
+    def ui_btn(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uibtn")
+        if len(args) < 6:
+            raise MiniError("uibtn 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
+        wid = self._ui_id(args, "uibtn")
+        x, y, w, h = self._ui_place(args, "uibtn")
+        text = str(args[5])
+        try:
+            b = tk.Button(self.ui_win_obj, text=text, font=("Microsoft YaHei UI", 10))
+            b.place(x=x, y=y, width=w, height=h)
+            self.ui_widgets[wid] = b
+        except Exception as e:
+            raise MiniError("uibtn 创建失败：" + str(e))
+        return None
+
+    def ui_label(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uilabel")
+        if len(args) < 6:
+            raise MiniError("uilabel 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
+        wid = self._ui_id(args, "uilabel")
+        x, y, w, h = self._ui_place(args, "uilabel")
+        text = str(args[5])
+        try:
+            lb = tk.Label(self.ui_win_obj, text=text, font=("Microsoft YaHei UI", 10), anchor="w", bg="#f0f0f0")
+            lb.place(x=x, y=y, width=w, height=h)
+            self.ui_widgets[wid] = lb
+        except Exception as e:
+            raise MiniError("uilabel 创建失败：" + str(e))
+        return None
+
+    def ui_input(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uiinput")
+        if len(args) < 5:
+            raise MiniError("uiinput 需要 5 个参数：(id, x, y, 宽, 高)")
+        wid = self._ui_id(args, "uiinput")
+        x, y, w, h = self._ui_place(args, "uiinput")
+        try:
+            e = tk.Entry(self.ui_win_obj, font=("Microsoft YaHei UI", 10))
+            e.place(x=x, y=y, width=w, height=h)
+            self.ui_widgets[wid] = e
+        except Exception as e2:
+            raise MiniError("uiinput 创建失败：" + str(e2))
+        return None
+
+    def ui_text(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uitext")
+        if len(args) < 5:
+            raise MiniError("uitext 需要 5 个参数：(id, x, y, 宽, 高)")
+        wid = self._ui_id(args, "uitext")
+        x, y, w, h = self._ui_place(args, "uitext")
+        try:
+            t = tk.Text(self.ui_win_obj, font=("Microsoft YaHei UI", 10), wrap="word")
+            t.place(x=x, y=y, width=w, height=h)
+            self.ui_widgets[wid] = t
+        except Exception as e2:
+            raise MiniError("uitext 创建失败：" + str(e2))
+        return None
+
+    def ui_check(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uicheck")
+        if len(args) < 4:
+            raise MiniError("uicheck 需要 4 个参数：(id, x, y, 文字)")
+        wid = self._ui_id(args, "uicheck")
+        x = self._ui_args_num(args, 1, "uicheck", "x")
+        y = self._ui_args_num(args, 2, "uicheck", "y")
+        text = str(args[3])
+        try:
+            var = tk.IntVar()
+            cb = tk.Checkbutton(self.ui_win_obj, text=text, variable=var,
+                                font=("Microsoft YaHei UI", 10), bg="#f0f0f0")
+            cb.place(x=int(x), y=int(y))
+            cb._hx_var = var
+            self.ui_widgets[wid] = cb
+        except Exception as e2:
+            raise MiniError("uicheck 创建失败：" + str(e2))
+        return None
+
+    def ui_list(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uilist")
+        if len(args) < 6:
+            raise MiniError("uilist 需要 6 个参数：(id, x, y, 宽, 高, 选项数组)")
+        wid = self._ui_id(args, "uilist")
+        x, y, w, h = self._ui_place(args, "uilist")
+        items = args[5]
+        if not isinstance(items, list):
+            raise MiniError("uilist 的第 6 个参数必须是数组")
+        try:
+            var = tk.StringVar()
+            lb = tk.Listbox(self.ui_win_obj, font=("Microsoft YaHei UI", 10))
+            for it in items:
+                lb.insert("end", fmt(it))
+            lb.place(x=x, y=y, width=w, height=h)
+            self.ui_widgets[wid] = lb
+        except Exception as e2:
+            raise MiniError("uilist 创建失败：" + str(e2))
+        return None
+
+    def ui_range(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uirange")
+        if len(args) < 5:
+            raise MiniError("uirange 需要 5 个参数：(id, x, y, 宽, 最大值)")
+        wid = self._ui_id(args, "uirange")
+        x = self._ui_args_num(args, 1, "uirange", "x")
+        y = self._ui_args_num(args, 2, "uirange", "y")
+        w = self._ui_args_num(args, 3, "uirange", "宽")
+        mx = self._ui_args_num(args, 4, "uirange", "最大值")
+        try:
+            sc = tk.Scale(self.ui_win_obj, from_=0, to=int(mx), orient="horizontal",
+                          font=("Microsoft YaHei UI", 9))
+            sc.place(x=int(x), y=int(y), width=int(w))
+            self.ui_widgets[wid] = sc
+        except Exception as e2:
+            raise MiniError("uirange 创建失败：" + str(e2))
+        return None
+
+    def ui_progress(self, args):
+        tk = self._ui_tk()
+        self._ui_need_win("uiprogress")
+        if len(args) < 5:
+            raise MiniError("uiprogress 需要 5 个参数：(id, x, y, 宽, 高)")
+        wid = self._ui_id(args, "uiprogress")
+        x, y, w, h = self._ui_place(args, "uiprogress")
+        try:
+            pb = tk.Canvas(self.ui_win_obj, bg="#e0e0e0", highlightthickness=1,
+                           highlightbackground="#cccccc")
+            pb.place(x=x, y=y, width=w, height=h)
+            pb._hx_rect = pb.create_rectangle(0, 0, 0, h, fill="#007acc", outline="")
+            pb._hx_w = w
+            pb._hx_h = h
+            self.ui_widgets[wid] = pb
+        except Exception as e2:
+            raise MiniError("uiprogress 创建失败：" + str(e2))
+        return None
+
+    def ui_on(self, args):
+        if len(args) < 3:
+            raise MiniError("uion 需要 3 个参数：(组件id, 事件名, 函数)")
+        wid = self._ui_id(args, "uion")
+        event = str(args[1])
+        fn = args[2]
+        if not isinstance(fn, (Fn, Native)):
+            raise MiniError("uion 的第 3 个参数必须是函数")
+        if wid not in self.ui_widgets:
+            raise MiniError("uion 找不到组件 " + wid)
+        w = self.ui_widgets[wid]
+        if event == "click":
+            tk_event = "<Button-1>"
+        elif event == "change":
+            tk_event = "<KeyRelease>"
+        elif event == "select":
+            tk_event = "<<ListboxSelect>>"
+        else:
+            raise MiniError("uion 支持的事件：click / change / select")
+        def handler(e):
+            try:
+                self.call(fn, [], 0)
+            except Exception as ex:
+                self._cb_errors.append(str(ex))
+        try:
+            w.bind(tk_event, handler)
+        except Exception as ex:
+            raise MiniError("uion 绑定失败：" + str(ex))
+        return None
+
+    def ui_get(self, args):
+        wid = self._ui_id(args, "uiget")
+        if wid not in self.ui_widgets:
+            raise MiniError("uiget 找不到组件 " + wid)
+        w = self.ui_widgets[wid]
+        tk = self._ui_tk()
+        try:
+            if isinstance(w, tk.Entry):
+                return w.get()
+            if isinstance(w, tk.Text):
+                return w.get("1.0", "end-1c")
+            if isinstance(w, tk.Checkbutton):
+                return bool(w._hx_var.get())
+            if isinstance(w, tk.Scale):
+                return float(w.get())
+            if isinstance(w, tk.Listbox):
+                sel = w.curselection()
+                return w.get(sel[0]) if sel else ""
+            if isinstance(w, tk.Canvas) and hasattr(w, "_hx_rect"):
+                return getattr(w, "_hx_value", 0)
+            if isinstance(w, tk.Label):
+                return w.cget("text")
+            if isinstance(w, tk.Button):
+                return w.cget("text")
+        except Exception as ex:
+            raise MiniError("uiget 失败：" + str(ex))
+        return ""
+
+    def ui_set(self, args):
+        if len(args) < 2:
+            raise MiniError("uiset 需要 2 个参数：(组件id, 值)")
+        wid = self._ui_id(args, "uiset")
+        if wid not in self.ui_widgets:
+            raise MiniError("uiset 找不到组件 " + wid)
+        w = self.ui_widgets[wid]
+        val = args[1]
+        tk = self._ui_tk()
+        try:
+            if isinstance(w, tk.Entry):
+                w.delete(0, "end"); w.insert(0, fmt(val))
+            elif isinstance(w, tk.Text):
+                w.delete("1.0", "end"); w.insert("1.0", fmt(val))
+            elif isinstance(w, tk.Checkbutton):
+                w._hx_var.set(1 if truth(val) else 0)
+            elif isinstance(w, tk.Scale):
+                w.set(float(val) if self._is_num(val) else 0)
+            elif isinstance(w, tk.Listbox):
+                w.delete(0, "end")
+                if isinstance(val, list):
+                    for it in val: w.insert("end", fmt(it))
+            elif isinstance(w, tk.Canvas) and hasattr(w, "_hx_rect"):
+                pct = float(val) if self._is_num(val) else 0
+                if pct < 0: pct = 0
+                if pct > 100: pct = 100
+                w._hx_value = pct
+                ww = w._hx_w * pct / 100.0
+                w.coords(w._hx_rect, 0, 0, ww, w._hx_h)
+            elif isinstance(w, (tk.Label, tk.Button)):
+                w.configure(text=fmt(val))
+        except Exception as ex:
+            raise MiniError("uiset 失败：" + str(ex))
+        return None
+
+    def ui_run(self, args):
+        self._ui_need_win("uirun")
+        self.ui_running = True
+        err = None
+        try:
+            self.ui_win_obj.update()
+            while True:
+                self.ui_win_obj.update()
+                time.sleep(0.02)
+                self._check_cb_errors()
+                if not self.ui_win_obj.winfo_exists():
+                    break
+        except MiniError as e:
+            err = e
+        except Exception as e:
+            err = MiniError("uirun 出错：" + str(e))
+        finally:
+            self.ui_running = False
+        if err is not None:
+            raise err
+        return None
+
     def close_gwin(self):
         if self.gwin is not None:
             try: self.gwin.destroy()
@@ -1128,6 +1451,20 @@ CHEATSHEET = {
   "gclear();                清空画面",
   "gsleep(500);             暂停 500 毫秒并刷新（做动画）",
 ],
+"界面": [
+  'uiwin(400, 300, "标题");     创建窗口',
+  'uilabel("id", x, y, 宽, 高, "文字");   标签',
+  'uibtn("id", x, y, 宽, 高, "按钮");     按钮',
+  'uiinput("id", x, y, 宽, 高);           单行输入框',
+  'uitext("id", x, y, 宽, 高);            多行文本',
+  'uicheck("id", x, y, "选项");           勾选框',
+  'uilist("id", x, y, 宽, 高, ["a","b"]); 列表',
+  'uirange("id", x, y, 宽, 100);          滑块（0 到最大值）',
+  'uiprogress("id", x, y, 宽, 高);        进度条',
+  'uion("id", "click", fn);               绑定事件（click/change/select）',
+  'uiget("id")   uiset("id", 值)          读取 / 设置组件值',
+  'uirun();                               启动界面事件循环',
+],
 "交互": [
   "k = gwaitkey();          等待按键，返回键名（如 \"a\", \"space\", \"enter\"）",
   "k = gwaitkey(3000);      最多等 3 秒，超时返回空字符串",
@@ -1148,7 +1485,7 @@ CHEATSHEET = {
 "注释": ["# 这一行是注释"],
 }
 
-CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","图形","交互","文件与系统","注释"]
+CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","界面","图形","交互","文件与系统","注释"]
 
 def cheatsheet_text():
     lines = []
@@ -1253,7 +1590,12 @@ AI_SYSTEM_PROMPT = (
     "gkeydown(fn) 按键回调、gclick(fn) 点击回调\n"
     "- 文件：readfile(p)、writefile(p,s)、appendfile(p,s)、exists(p)、files(dir)\n"
     "- 系统：openfile(p) 打开文件、openurl(u) 开浏览器、runapp(cmd) 启程序\n"
-    "- 注释用 #，语句末尾分号可省\n\n"
+    "- 注释用 #，语句末尾分号可省\n"
+    "- 图形界面（需要写 GUI 时用）：uiwin(w,h,title) 建窗口、uibtn(id,x,y,w,h,text) 按钮、"
+    "uilabel(id,x,y,w,h,text) 标签、uiinput(id,x,y,w,h) 输入框、uitext(id,x,y,w,h) 多行文本、"
+    "uicheck(id,x,y,text) 勾选框、uilist(id,x,y,w,h,items) 列表、uirange(id,x,y,w,max) 滑块、"
+    "uiprogress(id,x,y,w,h) 进度条；uion(id,\"click\",fn) 绑事件、uiget(id) 读值、uiset(id,v) 设值、"
+    "uirun() 启动界面\n\n"
     "回答要简洁、直接给可运行的 HX 代码，用 " + FENCE + "hxg 代码块包裹。"
 )
 
@@ -1345,6 +1687,475 @@ def ai_chat(cfg, messages):
     return body["choices"][0]["message"]["content"]
 
 
+UI_COMPONENTS = [
+    ("button", "按钮", 6, ["id", "x", "y", "w", "h", "text"]),
+    ("label", "标签", 6, ["id", "x", "y", "w", "h", "text"]),
+    ("input", "输入框", 5, ["id", "x", "y", "w", "h"]),
+    ("text", "多行文本", 5, ["id", "x", "y", "w", "h"]),
+    ("check", "勾选框", 4, ["id", "x", "y", "text"]),
+    ("list", "下拉列表", 6, ["id", "x", "y", "w", "h", "items"]),
+    ("range", "滑块", 5, ["id", "x", "y", "w", "max"]),
+    ("progress", "进度条", 5, ["id", "x", "y", "w", "h"]),
+]
+
+
+def ui_parse_code(text):
+    """从 HX 源码里解析 ui* 调用，还原成设计器组件列表"""
+    import re as _re
+    items = []
+    next_id = 1
+    def nid():
+        nonlocal next_id
+        r = "w%d" % next_id
+        next_id += 1
+        return r
+    def num(v, d=0):
+        try:
+            return int(float(str(v).strip()))
+        except Exception:
+            return d
+
+    # 去掉注释
+    lines = []
+    for ln in text.split("\n"):
+        s = ln.strip()
+        if s.startswith("#"):
+            continue
+        lines.append(ln)
+
+    for ln in lines:
+        s = ln.strip()
+        if not s:
+            continue
+        # 按钮 uibtn("id", x, y, w, h, "text")
+        m = _re.match(r'uibtn\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*"([^"]*)"\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "button",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 100), "h": num(m.group(5), 32), "text": m.group(6)}})
+            continue
+        m = _re.match(r'uilabel\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*"([^"]*)"\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "label",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 120), "h": num(m.group(5), 26), "text": m.group(6)}})
+            continue
+        m = _re.match(r'uiinput\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+)\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "input",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 180), "h": num(m.group(5), 28)}})
+            continue
+        m = _re.match(r'uitext\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+)\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "text",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 200), "h": num(m.group(5), 100)}})
+            continue
+        m = _re.match(r'uicheck\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*"([^"]*)"\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "check",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "text": m.group(4)}})
+            continue
+        m = _re.match(r'uilist\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+),', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "list",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 150), "h": num(m.group(5), 100)}})
+            continue
+        m = _re.match(r'uirange\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,\)]+)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "range",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 180), "max": num(m.group(5), 100)}})
+            continue
+        m = _re.match(r'uiprogress\s*\(\s*"([^"]*)"\s*,\s*([^,]+),\s*([^,]+),\s*([^,]+),\s*([^,]+)\s*\)', s)
+        if m:
+            items.append({"id": m.group(1), "kind": "progress",
+                          "props": {"id": m.group(1), "x": num(m.group(2)), "y": num(m.group(3)),
+                                    "w": num(m.group(4), 200), "h": num(m.group(5), 20)}})
+            continue
+    return items
+
+
+def ui_gen_code(items):
+    lines = ["# ===== 由 UI 设计器生成 ====="]
+    if not items:
+        lines.append("# （还没有添加组件）")
+        return "\n".join(lines)
+    # 计算窗口尺寸
+    max_x = 0; max_y = 0
+    for it in items:
+        w = it["props"].get("w", 100); h = it["props"].get("h", 30)
+        x = it["props"].get("x", 0); y = it["props"].get("y", 0)
+        max_x = max(max_x, x + w); max_y = max(max_y, y + h)
+    win_w = max(400, max_x + 30); win_h = max(300, max_y + 40)
+    title = "我的界面"
+    lines.append('uiwin(%d, %d, "%s");' % (win_w, win_h, title))
+    lines.append("")
+    for it in items:
+        kind = it["kind"]
+        p = it["props"]
+        wid = p.get("id", "w1")
+        if kind == "button":
+            lines.append('# 按钮 %s' % wid)
+            lines.append('uibtn("%s", %d, %d, %d, %d, "%s");'
+                         % (wid, p["x"], p["y"], p["w"], p["h"], p.get("text", "按钮")))
+        elif kind == "label":
+            lines.append('# 标签 %s' % wid)
+            lines.append('uilabel("%s", %d, %d, %d, %d, "%s");'
+                         % (wid, p["x"], p["y"], p["w"], p["h"], p.get("text", "标签")))
+        elif kind == "input":
+            lines.append('# 输入框 %s' % wid)
+            lines.append('uiinput("%s", %d, %d, %d, %d);'
+                         % (wid, p["x"], p["y"], p["w"], p["h"]))
+        elif kind == "text":
+            lines.append('# 多行文本 %s' % wid)
+            lines.append('uitext("%s", %d, %d, %d, %d);'
+                         % (wid, p["x"], p["y"], p["w"], p["h"]))
+        elif kind == "check":
+            lines.append('# 勾选框 %s' % wid)
+            lines.append('uicheck("%s", %d, %d, "%s");'
+                         % (wid, p["x"], p["y"], p.get("text", "选项")))
+        elif kind == "list":
+            lines.append('# 下拉列表 %s' % wid)
+            lines.append('uilist("%s", %d, %d, %d, %d, ["选项1", "选项2"]);'
+                         % (wid, p["x"], p["y"], p["w"], p["h"]))
+        elif kind == "range":
+            lines.append('# 滑块 %s' % wid)
+            lines.append('uirange("%s", %d, %d, %d, %d);'
+                         % (wid, p["x"], p["y"], p["w"], p.get("max", 100)))
+        elif kind == "progress":
+            lines.append('# 进度条 %s' % wid)
+            lines.append('uiprogress("%s", %d, %d, %d, %d);'
+                         % (wid, p["x"], p["y"], p["w"], p["h"]))
+        lines.append("")
+    lines.append("# 事件处理示例（按需修改）")
+    lines.append("on_click() {")
+    lines.append('    print("按钮被点击");')
+    lines.append("}")
+    lines.append("")
+    lines.append("# 启动界面")
+    lines.append("uirun();")
+    return "\n".join(lines)
+
+
+def open_ui_designer(root, ed, hl_fn, sync_fn, initial_items=None):
+    """打开 UI 设计器窗口"""
+    import tkinter as tk
+    from tkinter import messagebox
+
+    BG2 = "#1e1e1e"; PANEL2 = "#252526"; HEAD2 = "#2d2d30"; FG2 = "#cccccc"
+    BORDER2 = "#3e3e42"; ACCENT2 = "#0e639c"; SELECT = "#094771"
+    UIF = ("Microsoft YaHei UI", 9)
+
+    win = tk.Toplevel(root)
+    win.title("UI 设计器")
+    win.geometry("1000x680")
+    win.configure(bg=BG2)
+    win.transient(root)
+
+    items = list(initial_items) if initial_items else []
+    max_id = 0
+    for it in items:
+        try:
+            n = int(str(it["id"]).lstrip("w"))
+            if n > max_id: max_id = n
+        except Exception:
+            pass
+    state = {"kind": None, "sel": None, "next_id": max_id + 1}
+
+    # ---------- 左侧组件面板 ----------
+    left = tk.Frame(win, bg=PANEL2, width=160)
+    left.pack(side="left", fill="y")
+    left.pack_propagate(False)
+    tk.Label(left, text="组件", bg=HEAD2, fg="#9cdcfe", font=("Microsoft YaHei UI", 10, "bold"),
+             pady=8).pack(fill="x")
+    palette_btns = {}
+    for kind, label, _, _ in UI_COMPONENTS:
+        b = tk.Label(left, text="  " + label, bg=PANEL2, fg=FG2, font=UIF,
+                     anchor="w", padx=10, pady=6, cursor="hand2")
+        b.pack(fill="x")
+        b.bind("<Button-1>", lambda e, k=kind: pick_component(k))
+        b.bind("<Enter>", lambda e, w=b: w.configure(bg="#2a2d2e"))
+        b.bind("<Leave>", lambda e, w=b: w.configure(bg=PANEL2 if state["kind"] != b._k else SELECT) if hasattr(b, "_k") else w.configure(bg=PANEL2))
+        b._k = kind
+        palette_btns[kind] = b
+
+    def pick_component(kind):
+        state["kind"] = kind
+        for k, b in palette_btns.items():
+            b.configure(bg=SELECT if k == kind else PANEL2,
+                        fg="#ffffff" if k == kind else FG2)
+        status.configure(text="点击画布放置 " + dict((c[0], c[1]) for c in UI_COMPONENTS)[kind])
+
+    # ---------- 中间画布 ----------
+    center = tk.Frame(win, bg=BG2)
+    center.pack(side="left", fill="both", expand=True)
+    canvas_head = tk.Frame(center, bg=HEAD2, height=32)
+    canvas_head.pack(fill="x"); canvas_head.pack_propagate(False)
+    tk.Label(canvas_head, text="画布（点击放置组件，拖动调整位置，Delete 删除）",
+             bg=HEAD2, fg="#858585", font=UIF).pack(side="left", padx=10, pady=6)
+
+    canvas_wrap = tk.Frame(center, bg=BG2)
+    canvas_wrap.pack(fill="both", expand=True, padx=12, pady=12)
+    canvas = tk.Canvas(canvas_wrap, bg="#f0f0f0", highlightthickness=1,
+                       highlightbackground=BORDER2)
+    canvas.pack(fill="both", expand=True)
+
+    drag = {"item": None, "ox": 0, "oy": 0}
+
+    # ---------- 右侧属性面板 ----------
+    right = tk.Frame(win, bg=PANEL2, width=220)
+    right.pack(side="right", fill="y")
+    right.pack_propagate(False)
+    tk.Label(right, text="属性", bg=HEAD2, fg="#9cdcfe", font=("Microsoft YaHei UI", 10, "bold"),
+             pady=8).pack(fill="x")
+    prop_frame = tk.Frame(right, bg=PANEL2)
+    prop_frame.pack(fill="both", expand=True, padx=10, pady=10)
+
+    prop_entries = {}
+
+    def redraw():
+        canvas.delete("all")
+        for it in items:
+            p = it["props"]
+            x, y = p["x"], p["y"]
+            w = p.get("w", 100); h = p.get("h", 30)
+            kind = it["kind"]
+            outline = "#ff8c00" if it is state["sel"] else "#888888"
+            width = 2 if it is state["sel"] else 1
+            if kind == "button":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#e1e1e1", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + w / 2, y + h / 2, text=p.get("text", "按钮"), fill="#000", tags=("comp", it["id"]))
+            elif kind == "label":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#f0f0f0", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + 6, y + h / 2, text=p.get("text", "标签"), fill="#000", anchor="w", tags=("comp", it["id"]))
+            elif kind == "input":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#ffffff", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + 6, y + h / 2, text="输入框", fill="#999", anchor="w", tags=("comp", it["id"]))
+            elif kind == "text":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#ffffff", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + 6, y + 12, text="多行文本", fill="#999", anchor="w", tags=("comp", it["id"]))
+            elif kind == "check":
+                canvas.create_rectangle(x, y, x + 14, y + 14, fill="#ffffff", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + 20, y + 7, text=p.get("text", "选项"), fill="#000", anchor="w", tags=("comp", it["id"]))
+            elif kind == "list":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#ffffff", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + 6, y + 10, text="列表", fill="#999", anchor="w", tags=("comp", it["id"]))
+            elif kind == "range":
+                canvas.create_rectangle(x, y, x + w, y + 20, fill="#e8e8e8", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_text(x + w / 2, y + 10, text="滑块 0-" + str(p.get("max", 100)), fill="#000", tags=("comp", it["id"]))
+            elif kind == "progress":
+                canvas.create_rectangle(x, y, x + w, y + h, fill="#e0e0e0", outline=outline, width=width, tags=("comp", it["id"]))
+                canvas.create_rectangle(x, y, x + w * 0.4, y + h, fill="#007acc", outline="", tags=("comp", it["id"]))
+        # 网格
+        cw = canvas.winfo_width() or 600
+        ch = canvas.winfo_height() or 500
+        for gx in range(0, cw, 20):
+            canvas.create_line(gx, 0, gx, ch, fill="#e8e8e8", tags=("grid",))
+        for gy in range(0, ch, 20):
+            canvas.create_line(0, gy, cw, gy, fill="#e8e8e8", tags=("grid",))
+        canvas.tag_lower("grid")
+
+    def refresh_props():
+        for w in prop_frame.winfo_children():
+            w.destroy()
+        prop_entries.clear()
+        sel = state["sel"]
+        if sel is None:
+            tk.Label(prop_frame, text="选中组件后\n在这里编辑属性", bg=PANEL2, fg="#858585",
+                     font=UIF, justify="left").pack(anchor="w")
+            return
+        kind = sel["kind"]; p = sel["props"]
+        info = [c for c in UI_COMPONENTS if c[0] == kind][0]
+        tk.Label(prop_frame, text=info[1] + "（" + p["id"] + "）", bg=PANEL2, fg="#9cdcfe",
+                 font=("Microsoft YaHei UI", 10, "bold")).pack(anchor="w", pady=(0, 8))
+        fields = info[3]
+        for f in fields:
+            tk.Label(prop_frame, text=f, bg=PANEL2, fg="#858585", font=UIF).pack(anchor="w", pady=(4, 0))
+            e = tk.Entry(prop_frame, bg="#3c3c3c", fg=FG2, insertbackground=FG2,
+                         relief="flat", bd=0, font=("Consolas", 10), highlightthickness=0)
+            val = p.get(f, "")
+            if isinstance(val, list):
+                val = ",".join(str(v) for v in val)
+            e.insert(0, str(val))
+            e.pack(fill="x", pady=(2, 0))
+            prop_entries[f] = e
+
+        def apply_props(e=None):
+            for f, entry in prop_entries.items():
+                v = entry.get()
+                if f in ("x", "y", "w", "h", "max"):
+                    try:
+                        p[f] = int(float(v))
+                    except Exception:
+                        pass
+                elif f == "items":
+                    p[f] = [s.strip() for s in v.split(",") if s.strip()]
+                else:
+                    p[f] = v
+            redraw()
+
+        for e in prop_entries.values():
+            e.bind("<KeyRelease>", apply_props)
+            e.bind("<FocusOut>", apply_props)
+        tk.Button(prop_frame, text="删除此组件", command=lambda: delete_selected(),
+                  bg="#8b0000", fg="#ffffff", relief="flat", bd=0, font=UIF,
+                  padx=10, pady=4, cursor="hand2").pack(fill="x", pady=(16, 0))
+
+    def select_item(it):
+        state["sel"] = it
+        refresh_props()
+        redraw()
+
+    def delete_selected():
+        if state["sel"] is None: return
+        items.remove(state["sel"])
+        state["sel"] = None
+        refresh_props()
+        redraw()
+
+    def on_canvas_click(e):
+        x, y = e.x, e.y
+        # 先检查是否点中已有组件
+        hit = None
+        for it in reversed(items):
+            p = it["props"]
+            w = p.get("w", 100) if it["kind"] in ("button", "label", "input", "text", "list", "progress") else 160
+            h = p.get("h", 30) if it["kind"] in ("button", "label", "input", "text", "list", "progress") else 20
+            if p["x"] <= x <= p["x"] + w and p["y"] <= y <= p["y"] + h:
+                hit = it
+                break
+        if hit is not None:
+            select_item(hit)
+            return
+        # 否则放置新组件
+        if state["kind"] is None:
+            select_item(None)
+            return
+        kind = state["kind"]
+        wid = "w%d" % state["next_id"]
+        state["next_id"] += 1
+        defaults = {
+            "button": {"w": 100, "h": 32, "text": "按钮"},
+            "label": {"w": 120, "h": 26, "text": "标签"},
+            "input": {"w": 180, "h": 28},
+            "text": {"w": 200, "h": 100},
+            "check": {"text": "选项"},
+            "list": {"w": 150, "h": 100},
+            "range": {"w": 180, "max": 100},
+            "progress": {"w": 200, "h": 20},
+        }.get(kind, {})
+        props = {"id": wid, "x": x, "y": y}
+        props.update(defaults)
+        it = {"id": wid, "kind": kind, "props": props}
+        items.append(it)
+        select_item(it)
+        redraw()
+        status.configure(text="已添加 " + wid)
+
+    def on_press(e):
+        hit = None
+        for it in reversed(items):
+            p = it["props"]
+            w = p.get("w", 100) if it["kind"] in ("button", "label", "input", "text", "list", "progress") else 160
+            h = p.get("h", 30) if it["kind"] in ("button", "label", "input", "text", "list", "progress") else 20
+            if p["x"] <= e.x <= p["x"] + w and p["y"] <= e.y <= p["y"] + h:
+                hit = it
+                break
+        if hit is not None:
+            select_item(hit)
+            drag["item"] = hit
+            drag["ox"] = e.x - hit["props"]["x"]
+            drag["oy"] = e.y - hit["props"]["y"]
+
+    def on_drag(e):
+        if drag["item"] is None: return
+        drag["item"]["props"]["x"] = max(0, e.x - drag["ox"])
+        drag["item"]["props"]["y"] = max(0, e.y - drag["oy"])
+        redraw()
+
+    def on_release(e):
+        drag["item"] = None
+
+    canvas.bind("<Button-1>", on_press)
+    canvas.bind("<B1-Motion>", on_drag)
+    canvas.bind("<ButtonRelease-1>", on_release)
+    canvas.bind("<Double-Button-1>", on_canvas_click)
+    canvas.bind("<Configure>", lambda e: redraw())
+    win.bind("<Delete>", lambda e: delete_selected())
+
+    # ---------- 底部状态栏 + 生成 ----------
+    status = tk.Label(win, text="从左侧选组件，双击画布放置", bg=HEAD2, fg="#858585",
+                      font=UIF, anchor="w", padx=10, pady=4)
+    status.pack(side="bottom", fill="x")
+
+    btn_bar = tk.Frame(win, bg=HEAD2)
+    btn_bar.pack(side="bottom", fill="x", pady=(0, 1))
+
+    def do_generate():
+        code = ui_gen_code(items)
+        ed.insert("insert", "\n" + code + "\n")
+        try:
+            hl_fn(ed)
+            sync_fn()
+        except Exception:
+            pass
+        status.configure(text="代码已插入编辑器（共 %d 个组件）" % len(items))
+        messagebox.showinfo("生成完成", "代码已插入到编辑器当前光标位置。")
+
+    def do_preview():
+        if not items:
+            messagebox.showinfo("提示", "还没有添加组件")
+            return
+        code = ui_gen_code(items)
+        import tempfile
+        p = os.path.join(tempfile.gettempdir(), "_ui_preview.hxg")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(code)
+        try:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__), p])
+        except Exception as ex:
+            messagebox.showerror("预览失败", str(ex))
+
+    tk.Button(btn_bar, text="生成代码", command=do_generate,
+              bg=ACCENT2, fg="#ffffff", relief="flat", bd=0, font=UIF,
+              padx=16, pady=6, cursor="hand2").pack(side="right", padx=8, pady=6)
+    tk.Button(btn_bar, text="运行预览", command=do_preview,
+              bg="#3a3a3d", fg=FG2, relief="flat", bd=0, font=UIF,
+              padx=16, pady=6, cursor="hand2").pack(side="right", pady=6)
+
+    def do_import():
+        code = ed.get("1.0", "end-1c")
+        parsed = ui_parse_code(code)
+        if not parsed:
+            messagebox.showinfo("提示", "当前编辑器里没有找到 ui* 组件代码")
+            return
+        items.clear()
+        items.extend(parsed)
+        max_id = 0
+        for it in items:
+            try:
+                n = int(str(it["id"]).lstrip("w"))
+                if n > max_id: max_id = n
+            except Exception:
+                pass
+        state["next_id"] = max_id + 1
+        state["sel"] = None
+        refresh_props()
+        redraw()
+        status.configure(text="已从编辑器导入 %d 个组件" % len(items))
+
+    tk.Button(btn_bar, text="从编辑器导入", command=do_import,
+              bg="#3a3a3d", fg=FG2, relief="flat", bd=0, font=UIF,
+              padx=16, pady=6, cursor="hand2").pack(side="right", padx=(0, 8), pady=6)
+
+    redraw()
+    refresh_props()
+
+
 def build_gui(initial_path=None):
     import tkinter as tk
     from tkinter import filedialog, simpledialog, messagebox
@@ -1395,6 +2206,9 @@ def build_gui(initial_path=None):
     vm=tk.Menu(menubar,**mopt)
     vm.add_command(label="切换侧边栏      Ctrl+B",command=lambda: toggle_sidebar())
     vm.add_command(label="显示/隐藏 小智",command=lambda: toggle_ai())
+    vm.add_separator()
+    vm.add_command(label="UI 设计器        Ctrl+U",command=lambda: open_ui_designer(root,ed,hl,sync_editor))
+    vm.add_command(label="从编辑器代码加载到设计器",command=lambda: load_ui_from_editor())
     menubar.add_cascade(label="视图",menu=vm)
     hm=tk.Menu(menubar,**mopt)
     hm.add_command(label="语法速查",command=lambda: do_cheat())
@@ -1831,6 +2645,15 @@ def build_gui(initial_path=None):
         if not p: return
         with open(p,"w",encoding="utf-8") as f: f.write(ed.get("1.0","end-1c"))
         cur["path"]=p; refresh_tab(); update_status("已保存 %s"%os.path.basename(p))
+    def load_ui_from_editor():
+        code = ed.get("1.0", "end-1c")
+        parsed = ui_parse_code(code)
+        if not parsed:
+            messagebox.showinfo("提示", "当前编辑器里没有找到 ui* 组件代码。\n\n支持的：uiwin / uibtn / uilabel / uiinput / uitext / uicheck / uilist / uirange / uiprogress")
+            return
+        open_ui_designer(root, ed, hl, sync_editor, initial_items=parsed)
+        update_status("已加载 %d 个组件到设计器" % len(parsed))
+
     def do_cheat():
         win=tk.Toplevel(root); win.title("HX 语法速查"); win.geometry("760x720")
         win.configure(bg=BG)
@@ -1877,6 +2700,7 @@ def build_gui(initial_path=None):
     chat.tag_configure("ai_text",foreground="#d4d4d4",lmargin1=6,lmargin2=6)
     chat.tag_configure("sys",foreground="#6a9955",font=("Microsoft YaHei UI",8))
     chat.tag_configure("insert_btn",foreground="#4ec9b0",font=("Microsoft YaHei UI",9,"underline"),lmargin1=6,lmargin2=6)
+    chat.tag_configure("design_btn",foreground="#dcdcaa",font=("Microsoft YaHei UI",9,"underline"),lmargin1=6,lmargin2=6)
     chat.tag_configure("code",foreground="#ce9178",background="#1b1b1b",font=("Consolas",9),lmargin1=10,lmargin2=10,spacing1=3,spacing3=3)
     chat.tag_configure("err",foreground="#f14c4c")
 
@@ -1944,6 +2768,8 @@ def build_gui(initial_path=None):
                 chat_append(body.rstrip()+"\n", "code")
                 chat.configure(state="normal")
                 chat.insert("end","📋 双击此处插入代码\n\n",("insert_btn",))
+                if "uiwin(" in body or "uibtn(" in body or "uilabel(" in body:
+                    chat.insert("end","🧩 双击此处载入设计器\n\n",("design_btn",))
                 chat.configure(state="disabled")
             else:
                 if part: chat_append(part, "ai_text")
@@ -2018,20 +2844,39 @@ def build_gui(initial_path=None):
             ai_send_msg(); return "break"
     ai_input.bind("<Return>", ai_key)
     ai_input.bind("<Shift-Return>", lambda e: None)
+    def _code_before(pos):
+        code_ranges=chat.tag_ranges("code"); code_text=""
+        for j in range(0,len(code_ranges),2):
+            cs,ce=code_ranges[j],code_ranges[j+1]
+            if chat.compare(ce,"<=",pos): code_text=chat.get(cs,ce)
+        return code_text
+
     def chat_click(ev):
         idx=chat.index("@%d,%d"%(ev.x,ev.y))
+        # 插入到编辑器
         ranges=chat.tag_ranges("insert_btn")
         for i in range(0,len(ranges),2):
             s,en=ranges[i],ranges[i+1]
             if chat.compare(s,"<=",idx) and chat.compare(idx,"<=",en):
-                code_ranges=chat.tag_ranges("code"); code_text=""
-                for j in range(0,len(code_ranges),2):
-                    cs,ce=code_ranges[j],code_ranges[j+1]
-                    if chat.compare(ce,"<=",s): code_text=chat.get(cs,ce)
+                code_text=_code_before(s)
                 if code_text:
                     ed.insert("insert",code_text)
                     hl(ed); sync_editor(); ed.focus_set()
                     update_status("已插入代码到编辑器")
+                return
+        # 载入设计器
+        ranges=chat.tag_ranges("design_btn")
+        for i in range(0,len(ranges),2):
+            s,en=ranges[i],ranges[i+1]
+            if chat.compare(s,"<=",idx) and chat.compare(idx,"<=",en):
+                code_text=_code_before(s)
+                if code_text:
+                    parsed=ui_parse_code(code_text)
+                    if parsed:
+                        open_ui_designer(root,ed,hl,sync_editor,initial_items=parsed)
+                        update_status("已载入 %d 个组件到设计器" % len(parsed))
+                    else:
+                        messagebox.showinfo("提示","这段代码里没有可识别的 UI 组件")
                 return
     chat.bind("<Double-Button-1>",chat_click)
     chat.bind("<Key>",lambda e:"break")
@@ -2050,6 +2895,7 @@ def build_gui(initial_path=None):
     root.bind("<Control-s>",lambda e: (do_save(),"break")[1])
     root.bind("<Control-n>",lambda e: (do_new(),"break")[1])
     root.bind("<Control-b>",lambda e: (toggle_sidebar(),"break")[1])
+    root.bind("<Control-u>",lambda e: (open_ui_designer(root,ed,hl,sync_editor),"break")[1])
 
     if initial_path and os.path.exists(initial_path):
         with open(initial_path,encoding="utf-8") as f: s=f.read()
