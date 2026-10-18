@@ -345,6 +345,68 @@ class Native:
 _BG_NO_RESULT = object()
 
 
+# ===== Qt 全局单例 =====
+_QT_APP = None
+
+def _qt_app():
+    """获取或创建全局 QApplication 单例（Qt 只允许一个）"""
+    global _QT_APP
+    from PyQt5.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is None:
+        _QT_APP = QApplication(sys.argv if sys.argv else [""])
+        app = _QT_APP
+    else:
+        _QT_APP = app
+    return app
+
+
+# PCL2 风格的全局 QSS：圆角、柔和边框、蓝色强调
+_UI_QSS = """
+QWidget { background:#fafaf9; font-family:'Microsoft YaHei UI'; font-size:10pt; color:#1c1917; }
+QPushButton {
+    background:#ffffff; border:1px solid #d8d5d0; border-radius:6px;
+    padding:4px 12px;
+}
+QPushButton:hover { background:#f4f3f0; border-color:#2f7fd8; }
+QPushButton:pressed { background:#e8e6e2; }
+QPushButton:disabled { color:#a8a5a0; }
+QLineEdit, QTextEdit, QComboBox, QTableWidget {
+    background:#ffffff; border:1px solid #d8d5d0; border-radius:6px;
+    padding:4px 8px;
+}
+QLineEdit:focus, QTextEdit:focus { border-color:#2f7fd8; }
+QComboBox::drop-down { border:none; width:20px; }
+QListWidget {
+    background:#ffffff; border:1px solid #d8d5d0; border-radius:6px;
+}
+QListWidget::item { padding:4px 8px; }
+QListWidget::item:selected { background:#e0efff; color:#1c1917; }
+QTabWidget::pane {
+    border:1px solid #d8d5d0; border-radius:6px; background:#ffffff; top:-1px;
+}
+QTabBar::tab {
+    background:#f4f3f0; border:1px solid #d8d5d0; border-bottom:none;
+    border-top-left-radius:6px; border-top-right-radius:6px;
+    padding:6px 14px; margin-right:2px;
+}
+QTabBar::tab:selected { background:#ffffff; color:#1c1917; }
+QProgressBar { background:#e8e6e2; border:none; border-radius:4px; }
+QProgressBar::chunk { background:#2f7fd8; border-radius:4px; }
+QSlider::groove:horizontal { background:#e8e6e2; height:4px; border-radius:2px; }
+QSlider::handle:horizontal {
+    background:#2f7fd8; width:14px; height:14px; margin:-5px 0;
+    border-radius:7px;
+}
+QHeaderView::section {
+    background:#f4f3f0; border:none; border-bottom:1px solid #d8d5d0;
+    padding:4px 8px;
+}
+QCheckBox, QRadioButton { spacing:6px; }
+QCheckBox::indicator, QRadioButton::indicator { width:14px; height:14px; }
+"""
+
+
 class Return(Exception):
     def __init__(self,value): self.value=value
 
@@ -1059,7 +1121,7 @@ class Interp:
         except Exception as e:
             raise MiniError("zipinfo 失败：" + str(e))
 
-    # ===== UI 运行时 =====
+    # ===== UI 运行时（PyQt5） =====
     def _ui_need_win(self, fname):
         if self.ui_win_obj is None:
             raise MiniError(fname + " 需要先调用 uiwin(宽, 高, 标题)")
@@ -1074,16 +1136,15 @@ class Interp:
             raise MiniError(fname + " 的第一个参数必须是组件 id（字符串）")
         return args[0]
 
-    def _ui_tk(self):
-        import tkinter as tk
-        try:
-            from tkinter import ttk  # noqa: F401
-        except Exception:
-            pass
-        return tk
+    def _ui_place(self, args, fname):
+        x = self._ui_args_num(args, 1, fname, "x")
+        y = self._ui_args_num(args, 2, fname, "y")
+        w = self._ui_args_num(args, 3, fname, "宽")
+        h = self._ui_args_num(args, 4, fname, "高")
+        return int(x), int(y), int(w), int(h)
 
     def ui_win(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QWidget
         if len(args) < 3:
             raise MiniError("uiwin 需要 3 个参数：宽, 高, 标题")
         w = int(self._ui_args_num(args, 0, "uiwin", "宽"))
@@ -1092,32 +1153,22 @@ class Interp:
         if w <= 0 or h <= 0:
             raise MiniError("uiwin 的宽和高必须大于 0")
         if self.ui_win_obj is not None:
-            try: self.ui_win_obj.destroy()
+            try: self.ui_win_obj.close()
             except Exception: pass
         self.ui_widgets = {}
         self.ui_handlers = {}
         try:
-            if self.root is not None:
-                self.ui_win_obj = tk.Toplevel(self.root)
-            else:
-                self.ui_win_obj = tk.Tk()
-            self.ui_win_obj.title(title)
-            self.ui_win_obj.geometry("%dx%d" % (w, h))
-            self.ui_win_obj.configure(bg="#fafaf9")
-            self.ui_win_obj.update()
+            _qt_app()
+            self.ui_win_obj = QWidget()
+            self.ui_win_obj.setWindowTitle(title)
+            self.ui_win_obj.resize(w, h)
+            self.ui_win_obj.setStyleSheet(_UI_QSS)
         except Exception as e:
             raise MiniError("uiwin 创建窗口失败：" + str(e))
         return None
 
-    def _ui_place(self, args, fname):
-        x = self._ui_args_num(args, 1, fname, "x")
-        y = self._ui_args_num(args, 2, fname, "y")
-        w = self._ui_args_num(args, 3, fname, "宽")
-        h = self._ui_args_num(args, 4, fname, "高")
-        return int(x), int(y), int(w), int(h)
-
     def ui_btn(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QPushButton
         self._ui_need_win("uibtn")
         if len(args) < 6:
             raise MiniError("uibtn 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
@@ -1125,15 +1176,16 @@ class Interp:
         x, y, w, h = self._ui_place(args, "uibtn")
         text = str(args[5])
         try:
-            b = tk.Button(self.ui_win_obj, text=text, font=("Microsoft YaHei UI", 10))
-            b.place(x=x, y=y, width=w, height=h)
+            b = QPushButton(text, self.ui_win_obj)
+            b.setGeometry(x, y, w, h)
             self.ui_widgets[wid] = b
         except Exception as e:
             raise MiniError("uibtn 创建失败：" + str(e))
         return None
 
     def ui_label(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtCore import Qt
         self._ui_need_win("uilabel")
         if len(args) < 6:
             raise MiniError("uilabel 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
@@ -1141,45 +1193,65 @@ class Interp:
         x, y, w, h = self._ui_place(args, "uilabel")
         text = str(args[5])
         try:
-            lb = tk.Label(self.ui_win_obj, text=text, font=("Microsoft YaHei UI", 10), anchor="w", bg="#f0f0f0")
-            lb.place(x=x, y=y, width=w, height=h)
+            lb = QLabel(text, self.ui_win_obj)
+            lb.setGeometry(x, y, w, h)
+            lb.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
             self.ui_widgets[wid] = lb
         except Exception as e:
             raise MiniError("uilabel 创建失败：" + str(e))
         return None
 
+    def ui_heading(self, args):
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtCore import Qt
+        self._ui_need_win("uiheading")
+        if len(args) < 6:
+            raise MiniError("uiheading 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
+        wid = self._ui_id(args, "uiheading")
+        x, y, w, h = self._ui_place(args, "uiheading")
+        text = str(args[5])
+        try:
+            lb = QLabel(text, self.ui_win_obj)
+            lb.setGeometry(x, y, w, h)
+            lb.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            lb.setStyleSheet("font-size:15pt;font-weight:bold;color:#1c1917;background:transparent;")
+            self.ui_widgets[wid] = lb
+        except Exception as e:
+            raise MiniError("uiheading 创建失败：" + str(e))
+        return None
+
     def ui_input(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QLineEdit
         self._ui_need_win("uiinput")
         if len(args) < 5:
             raise MiniError("uiinput 需要 5 个参数：(id, x, y, 宽, 高)")
         wid = self._ui_id(args, "uiinput")
         x, y, w, h = self._ui_place(args, "uiinput")
         try:
-            e = tk.Entry(self.ui_win_obj, font=("Microsoft YaHei UI", 10))
-            e.place(x=x, y=y, width=w, height=h)
+            e = QLineEdit(self.ui_win_obj)
+            e.setGeometry(x, y, w, h)
             self.ui_widgets[wid] = e
         except Exception as e2:
             raise MiniError("uiinput 创建失败：" + str(e2))
         return None
 
     def ui_text(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QTextEdit
         self._ui_need_win("uitext")
         if len(args) < 5:
             raise MiniError("uitext 需要 5 个参数：(id, x, y, 宽, 高)")
         wid = self._ui_id(args, "uitext")
         x, y, w, h = self._ui_place(args, "uitext")
         try:
-            t = tk.Text(self.ui_win_obj, font=("Microsoft YaHei UI", 10), wrap="word")
-            t.place(x=x, y=y, width=w, height=h)
+            t = QTextEdit(self.ui_win_obj)
+            t.setGeometry(x, y, w, h)
             self.ui_widgets[wid] = t
         except Exception as e2:
             raise MiniError("uitext 创建失败：" + str(e2))
         return None
 
     def ui_check(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QCheckBox
         self._ui_need_win("uicheck")
         if len(args) < 4:
             raise MiniError("uicheck 需要 4 个参数：(id, x, y, 文字)")
@@ -1188,94 +1260,16 @@ class Interp:
         y = self._ui_args_num(args, 2, "uicheck", "y")
         text = str(args[3])
         try:
-            var = tk.IntVar()
-            cb = tk.Checkbutton(self.ui_win_obj, text=text, variable=var,
-                                font=("Microsoft YaHei UI", 10), bg="#f0f0f0")
-            cb.place(x=int(x), y=int(y))
-            cb._hx_var = var
+            cb = QCheckBox(text, self.ui_win_obj)
+            cb.move(int(x), int(y))
+            cb.adjustSize()
             self.ui_widgets[wid] = cb
         except Exception as e2:
             raise MiniError("uicheck 创建失败：" + str(e2))
         return None
 
-    def ui_list(self, args):
-        tk = self._ui_tk()
-        self._ui_need_win("uilist")
-        if len(args) < 6:
-            raise MiniError("uilist 需要 6 个参数：(id, x, y, 宽, 高, 选项数组)")
-        wid = self._ui_id(args, "uilist")
-        x, y, w, h = self._ui_place(args, "uilist")
-        items = args[5]
-        if not isinstance(items, list):
-            raise MiniError("uilist 的第 6 个参数必须是数组")
-        try:
-            var = tk.StringVar()
-            lb = tk.Listbox(self.ui_win_obj, font=("Microsoft YaHei UI", 10))
-            for it in items:
-                lb.insert("end", fmt(it))
-            lb.place(x=x, y=y, width=w, height=h)
-            self.ui_widgets[wid] = lb
-        except Exception as e2:
-            raise MiniError("uilist 创建失败：" + str(e2))
-        return None
-
-    def ui_range(self, args):
-        tk = self._ui_tk()
-        self._ui_need_win("uirange")
-        if len(args) < 5:
-            raise MiniError("uirange 需要 5 个参数：(id, x, y, 宽, 最大值)")
-        wid = self._ui_id(args, "uirange")
-        x = self._ui_args_num(args, 1, "uirange", "x")
-        y = self._ui_args_num(args, 2, "uirange", "y")
-        w = self._ui_args_num(args, 3, "uirange", "宽")
-        mx = self._ui_args_num(args, 4, "uirange", "最大值")
-        try:
-            sc = tk.Scale(self.ui_win_obj, from_=0, to=int(mx), orient="horizontal",
-                          font=("Microsoft YaHei UI", 9))
-            sc.place(x=int(x), y=int(y), width=int(w))
-            self.ui_widgets[wid] = sc
-        except Exception as e2:
-            raise MiniError("uirange 创建失败：" + str(e2))
-        return None
-
-    def ui_progress(self, args):
-        tk = self._ui_tk()
-        self._ui_need_win("uiprogress")
-        if len(args) < 5:
-            raise MiniError("uiprogress 需要 5 个参数：(id, x, y, 宽, 高)")
-        wid = self._ui_id(args, "uiprogress")
-        x, y, w, h = self._ui_place(args, "uiprogress")
-        try:
-            pb = tk.Canvas(self.ui_win_obj, bg="#e0e0e0", highlightthickness=1,
-                           highlightbackground="#cccccc")
-            pb.place(x=x, y=y, width=w, height=h)
-            pb._hx_rect = pb.create_rectangle(0, 0, 0, h, fill="#007acc", outline="")
-            pb._hx_w = w
-            pb._hx_h = h
-            self.ui_widgets[wid] = pb
-        except Exception as e2:
-            raise MiniError("uiprogress 创建失败：" + str(e2))
-        return None
-
-    def ui_heading(self, args):
-        tk = self._ui_tk()
-        self._ui_need_win("uiheading")
-        if len(args) < 6:
-            raise MiniError("uiheading 需要 6 个参数：(id, x, y, 宽, 高, 文字)")
-        wid = self._ui_id(args, "uiheading")
-        x, y, w, h = self._ui_place(args, "uiheading")
-        text = str(args[5])
-        try:
-            lb = tk.Label(self.ui_win_obj, text=text, anchor="w", bg="#fafaf9",
-                          fg="#1c1917", font=("Microsoft YaHei UI", 15, "bold"))
-            lb.place(x=x, y=y, width=w, height=h)
-            self.ui_widgets[wid] = lb
-        except Exception as e:
-            raise MiniError("uiheading 创建失败：" + str(e))
-        return None
-
     def ui_radio(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QRadioButton, QButtonGroup, QWidget
         self._ui_need_win("uiradio")
         if len(args) < 6:
             raise MiniError("uiradio 需要 6 个参数：(id, x, y, 宽, 高, 选项数组)")
@@ -1285,23 +1279,28 @@ class Interp:
         if not isinstance(items, list):
             raise MiniError("uiradio 的第 6 个参数必须是数组")
         try:
-            var = tk.StringVar(value=str(items[0]) if items else "")
-            holder = tk.Frame(self.ui_win_obj, bg="#fafaf9")
-            holder.place(x=x, y=y, width=w, height=h)
-            for it in items:
-                rb = tk.Radiobutton(holder, text=fmt(it), variable=var, value=fmt(it),
-                                    bg="#fafaf9", fg="#1c1917", anchor="w",
-                                    font=("Microsoft YaHei UI", 10), highlightthickness=0,
-                                    activebackground="#fafaf9")
-                rb.pack(fill="x")
-            holder._hx_var = var
+            holder = QWidget(self.ui_win_obj)
+            holder.setGeometry(x, y, w, h)
+            holder.setStyleSheet("background:transparent;")
+            group = QButtonGroup(holder)
+            btns = []
+            for i, it in enumerate(items):
+                rb = QRadioButton(fmt(it), holder)
+                rb.move(0, i * 22)
+                rb.adjustSize()
+                group.addButton(rb, i)
+                btns.append(rb)
+            if btns:
+                btns[0].setChecked(True)
+            holder._hx_group = group
+            holder._hx_buttons = btns
             self.ui_widgets[wid] = holder
         except Exception as e:
             raise MiniError("uiradio 创建失败：" + str(e))
         return None
 
     def ui_combo(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QComboBox
         self._ui_need_win("uicombo")
         if len(args) < 6:
             raise MiniError("uicombo 需要 6 个参数：(id, x, y, 宽, 高, 选项数组)")
@@ -1311,38 +1310,97 @@ class Interp:
         if not isinstance(items, list):
             raise MiniError("uicombo 的第 6 个参数必须是数组")
         try:
-            var = tk.StringVar()
-            cb = tk.ttk.Combobox(self.ui_win_obj, textvariable=var, values=[fmt(i) for i in items],
-                                 state="readonly", font=("Microsoft YaHei UI", 10))
-            cb.place(x=x, y=y, width=w, height=h)
-            if items:
-                cb.current(0)
+            cb = QComboBox(self.ui_win_obj)
+            cb.setGeometry(x, y, w, h)
+            for it in items:
+                cb.addItem(fmt(it))
             self.ui_widgets[wid] = cb
         except Exception as e:
             raise MiniError("uicombo 创建失败：" + str(e))
         return None
 
+    def ui_list(self, args):
+        from PyQt5.QtWidgets import QListWidget
+        self._ui_need_win("uilist")
+        if len(args) < 6:
+            raise MiniError("uilist 需要 6 个参数：(id, x, y, 宽, 高, 选项数组)")
+        wid = self._ui_id(args, "uilist")
+        x, y, w, h = self._ui_place(args, "uilist")
+        items = args[5]
+        if not isinstance(items, list):
+            raise MiniError("uilist 的第 6 个参数必须是数组")
+        try:
+            lb = QListWidget(self.ui_win_obj)
+            lb.setGeometry(x, y, w, h)
+            for it in items:
+                lb.addItem(fmt(it))
+            self.ui_widgets[wid] = lb
+        except Exception as e2:
+            raise MiniError("uilist 创建失败：" + str(e2))
+        return None
+
+    def ui_range(self, args):
+        from PyQt5.QtWidgets import QSlider
+        from PyQt5.QtCore import Qt
+        self._ui_need_win("uirange")
+        if len(args) < 5:
+            raise MiniError("uirange 需要 5 个参数：(id, x, y, 宽, 最大值)")
+        wid = self._ui_id(args, "uirange")
+        x = self._ui_args_num(args, 1, "uirange", "x")
+        y = self._ui_args_num(args, 2, "uirange", "y")
+        w = self._ui_args_num(args, 3, "uirange", "宽")
+        mx = self._ui_args_num(args, 4, "uirange", "最大值")
+        try:
+            sc = QSlider(Qt.Horizontal, self.ui_win_obj)
+            sc.setGeometry(int(x), int(y), int(w), 24)
+            sc.setRange(0, int(mx))
+            self.ui_widgets[wid] = sc
+        except Exception as e2:
+            raise MiniError("uirange 创建失败：" + str(e2))
+        return None
+
+    def ui_progress(self, args):
+        from PyQt5.QtWidgets import QProgressBar
+        self._ui_need_win("uiprogress")
+        if len(args) < 5:
+            raise MiniError("uiprogress 需要 5 个参数：(id, x, y, 宽, 高)")
+        wid = self._ui_id(args, "uiprogress")
+        x, y, w, h = self._ui_place(args, "uiprogress")
+        try:
+            pb = QProgressBar(self.ui_win_obj)
+            pb.setGeometry(x, y, w, h)
+            pb.setRange(0, 100)
+            pb.setValue(0)
+            pb.setTextVisible(False)
+            self.ui_widgets[wid] = pb
+        except Exception as e2:
+            raise MiniError("uiprogress 创建失败：" + str(e2))
+        return None
+
     def ui_image(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QLabel
+        from PyQt5.QtCore import Qt
         self._ui_need_win("uiimage")
         if len(args) < 5:
             raise MiniError("uiimage 需要 5 个参数：(id, x, y, 宽, 高)")
         wid = self._ui_id(args, "uiimage")
         x, y, w, h = self._ui_place(args, "uiimage")
         try:
-            cv = tk.Canvas(self.ui_win_obj, bg="#ffffff", highlightthickness=1,
-                           highlightbackground="#e7e5e4")
-            cv.place(x=x, y=y, width=w, height=h)
-            cv._hx_w = w
-            cv._hx_h = h
-            cv._hx_photo = None
-            self.ui_widgets[wid] = cv
+            lb = QLabel(self.ui_win_obj)
+            lb.setGeometry(x, y, w, h)
+            lb.setAlignment(Qt.AlignCenter)
+            lb.setStyleSheet("background:#ffffff;border:1px solid #e7e5e4;border-radius:6px;")
+            lb._hx_w = w
+            lb._hx_h = h
+            lb._hx_path = ""
+            lb._hx_pixmap = None
+            self.ui_widgets[wid] = lb
         except Exception as e:
             raise MiniError("uiimage 创建失败：" + str(e))
         return None
 
     def ui_table(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QTableWidget, QHeaderView
         self._ui_need_win("uitable")
         if len(args) < 6:
             raise MiniError("uitable 需要 6 个参数：(id, x, y, 宽, 高, 列名数组)")
@@ -1352,40 +1410,36 @@ class Interp:
         if not isinstance(cols, list):
             raise MiniError("uitable 的第 6 个参数必须是数组")
         try:
-            frame = tk.Frame(self.ui_win_obj, bg="#ffffff", highlightthickness=1,
-                             highlightbackground="#e7e5e4")
-            frame.place(x=x, y=y, width=w, height=h)
-            tv = tk.ttk.Treeview(frame, columns=[fmt(c) for c in cols], show="headings", height=4)
-            for c in cols:
-                tv.heading(fmt(c), text=fmt(c))
-                tv.column(fmt(c), width=max(60, int(w / max(1, len(cols)))), anchor="w")
-            vsb = tk.Scrollbar(frame, orient="vertical", command=tv.yview)
-            tv.configure(yscrollcommand=vsb.set)
-            tv.pack(side="left", fill="both", expand=True)
-            vsb.pack(side="right", fill="y")
+            tv = QTableWidget(self.ui_win_obj)
+            tv.setGeometry(x, y, w, h)
+            tv.setColumnCount(len(cols))
+            tv.setHorizontalHeaderLabels([fmt(c) for c in cols])
+            tv.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+            tv.verticalHeader().setVisible(False)
+            tv.setRowCount(0)
             self.ui_widgets[wid] = tv
         except Exception as e:
             raise MiniError("uitable 创建失败：" + str(e))
         return None
 
     def ui_panel(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QFrame
         self._ui_need_win("uipanel")
         if len(args) < 5:
             raise MiniError("uipanel 需要 5 个参数：(id, x, y, 宽, 高)")
         wid = self._ui_id(args, "uipanel")
         x, y, w, h = self._ui_place(args, "uipanel")
         try:
-            f = tk.Frame(self.ui_win_obj, bg="#ffffff", highlightthickness=1,
-                         highlightbackground="#e7e5e4")
-            f.place(x=x, y=y, width=w, height=h)
+            f = QFrame(self.ui_win_obj)
+            f.setGeometry(x, y, w, h)
+            f.setStyleSheet("QFrame{background:#ffffff;border:1px solid #e7e5e4;border-radius:6px;}")
             self.ui_widgets[wid] = f
         except Exception as e:
             raise MiniError("uipanel 创建失败：" + str(e))
         return None
 
     def ui_separator(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QFrame
         self._ui_need_win("uiseparator")
         if len(args) < 4:
             raise MiniError("uiseparator 需要 4 个参数：(id, x, y, 宽)")
@@ -1394,15 +1448,16 @@ class Interp:
         y = self._ui_args_num(args, 2, "uiseparator", "y")
         w = self._ui_args_num(args, 3, "uiseparator", "宽")
         try:
-            line = tk.Frame(self.ui_win_obj, bg="#e7e5e4", height=1)
-            line.place(x=int(x), y=int(y), width=int(w), height=1)
+            line = QFrame(self.ui_win_obj)
+            line.setGeometry(int(x), int(y), int(w), 1)
+            line.setStyleSheet("background:#e7e5e4;border:none;")
             self.ui_widgets[wid] = line
         except Exception as e:
             raise MiniError("uiseparator 创建失败：" + str(e))
         return None
 
     def ui_tabs(self, args):
-        tk = self._ui_tk()
+        from PyQt5.QtWidgets import QTabWidget, QWidget
         self._ui_need_win("uitabs")
         if len(args) < 6:
             raise MiniError("uitabs 需要 6 个参数：(id, x, y, 宽, 高, 标签名数组)")
@@ -1412,17 +1467,20 @@ class Interp:
         if not isinstance(items, list):
             raise MiniError("uitabs 的第 6 个参数必须是数组")
         try:
-            nb = tk.ttk.Notebook(self.ui_win_obj)
-            nb.place(x=x, y=y, width=w, height=h)
+            nb = QTabWidget(self.ui_win_obj)
+            nb.setGeometry(x, y, w, h)
             for it in items:
-                page = tk.Frame(nb, bg="#ffffff")
-                nb.add(page, text=fmt(it))
+                page = QWidget()
+                nb.addTab(page, fmt(it))
             self.ui_widgets[wid] = nb
         except Exception as e:
             raise MiniError("uitabs 创建失败：" + str(e))
         return None
 
     def ui_on(self, args):
+        from PyQt5.QtWidgets import (QPushButton, QCheckBox, QComboBox, QListWidget,
+                                     QSlider, QLineEdit, QTextEdit, QTabWidget,
+                                     QWidget)
         if len(args) < 3:
             raise MiniError("uion 需要 3 个参数：(组件id, 事件名, 函数)")
         wid = self._ui_id(args, "uion")
@@ -1433,64 +1491,112 @@ class Interp:
         if wid not in self.ui_widgets:
             raise MiniError("uion 找不到组件 " + wid)
         w = self.ui_widgets[wid]
-        if event == "click":
-            tk_event = "<Button-1>"
-        elif event == "change":
-            tk_event = "<KeyRelease>"
-        elif event == "select":
-            tk_event = "<<ListboxSelect>>"
-        else:
-            raise MiniError("uion 支持的事件：click / change / select")
-        def handler(e):
+
+        def handler(*a):
             try:
                 self.call(fn, [], 0)
             except Exception as ex:
                 self._cb_errors.append(str(ex))
+
         try:
-            w.bind(tk_event, handler)
+            if isinstance(w, QPushButton):
+                if event != "click":
+                    raise MiniError("按钮只支持 click 事件")
+                w.clicked.connect(handler)
+            elif isinstance(w, QCheckBox):
+                if event not in ("click", "change"):
+                    raise MiniError("勾选框支持 click / change 事件")
+                w.stateChanged.connect(handler)
+            elif isinstance(w, QLineEdit):
+                if event not in ("change", "select"):
+                    raise MiniError("输入框支持 change / select 事件")
+                w.textChanged.connect(handler)
+            elif isinstance(w, QTextEdit):
+                if event != "change":
+                    raise MiniError("多行文本只支持 change 事件")
+                w.textChanged.connect(handler)
+            elif isinstance(w, QComboBox):
+                if event not in ("change", "select"):
+                    raise MiniError("下拉框支持 change / select 事件")
+                w.currentIndexChanged.connect(handler)
+            elif isinstance(w, QListWidget):
+                if event not in ("change", "select"):
+                    raise MiniError("列表支持 change / select 事件")
+                w.currentRowChanged.connect(handler)
+            elif isinstance(w, QSlider):
+                if event != "change":
+                    raise MiniError("滑块只支持 change 事件")
+                w.valueChanged.connect(handler)
+            elif isinstance(w, QTabWidget):
+                if event != "select":
+                    raise MiniError("标签页只支持 select 事件")
+                w.currentChanged.connect(handler)
+            elif isinstance(w, QWidget) and hasattr(w, "_hx_group"):
+                if event not in ("click", "change"):
+                    raise MiniError("单选组支持 click / change 事件")
+                w._hx_group.buttonClicked.connect(handler)
+            else:
+                raise MiniError("组件 " + wid + " 不支持绑定事件")
+        except MiniError:
+            raise
         except Exception as ex:
             raise MiniError("uion 绑定失败：" + str(ex))
         return None
 
     def ui_get(self, args):
+        from PyQt5.QtWidgets import (QPushButton, QCheckBox, QComboBox, QListWidget,
+                                     QSlider, QLineEdit, QTextEdit, QTabWidget,
+                                     QProgressBar, QLabel, QTableWidget, QWidget)
         wid = self._ui_id(args, "uiget")
         if wid not in self.ui_widgets:
             raise MiniError("uiget 找不到组件 " + wid)
         w = self.ui_widgets[wid]
-        tk = self._ui_tk()
         try:
-            if isinstance(w, tk.Entry):
-                return w.get()
-            if isinstance(w, tk.Text):
-                return w.get("1.0", "end-1c")
-            if isinstance(w, tk.Checkbutton):
-                return bool(w._hx_var.get())
-            if isinstance(w, tk.Frame) and hasattr(w, "_hx_var"):
-                return w._hx_var.get()
-            if w.winfo_class() == "TCombobox":
-                return w.get()
-            if w.winfo_class() == "Treeview":
-                return list(w.item(w.focus())["values"]) if w.focus() else []
-            if w.winfo_class() == "TNotebook":
-                return w.tab(w.select(), "text") if w.tabs() else ""
-            if isinstance(w, tk.Scale):
-                return float(w.get())
-            if isinstance(w, tk.Listbox):
-                sel = w.curselection()
-                return w.get(sel[0]) if sel else ""
-            if isinstance(w, tk.Canvas) and hasattr(w, "_hx_rect"):
-                return getattr(w, "_hx_value", 0)
-            if isinstance(w, tk.Canvas) and hasattr(w, "_hx_photo"):
+            if isinstance(w, QLineEdit):
+                return w.text()
+            if isinstance(w, QTextEdit):
+                return w.toPlainText()
+            if isinstance(w, QCheckBox):
+                return bool(w.isChecked())
+            if isinstance(w, QComboBox):
+                return w.currentText()
+            if isinstance(w, QListWidget):
+                it = w.currentItem()
+                return it.text() if it else ""
+            if isinstance(w, QSlider):
+                return float(w.value())
+            if isinstance(w, QProgressBar):
+                return float(w.value())
+            if isinstance(w, QTabWidget):
+                return w.tabText(w.currentIndex()) if w.count() else ""
+            if isinstance(w, QTableWidget):
+                row = w.currentRow()
+                if row < 0:
+                    return []
+                return [(w.item(row, c).text() if w.item(row, c) else "")
+                        for c in range(w.columnCount())]
+            if isinstance(w, QWidget) and hasattr(w, "_hx_group"):
+                cid = w._hx_group.checkedId()
+                if 0 <= cid < len(w._hx_buttons):
+                    return w._hx_buttons[cid].text()
+                return ""
+            if isinstance(w, QWidget) and hasattr(w, "_hx_path"):
                 return getattr(w, "_hx_path", "")
-            if isinstance(w, tk.Label):
-                return w.cget("text")
-            if isinstance(w, tk.Button):
-                return w.cget("text")
+            if isinstance(w, QLabel):
+                return w.text()
+            if isinstance(w, QPushButton):
+                return w.text()
         except Exception as ex:
             raise MiniError("uiget 失败：" + str(ex))
         return ""
 
     def ui_set(self, args):
+        from PyQt5.QtWidgets import (QPushButton, QCheckBox, QComboBox, QListWidget,
+                                     QSlider, QLineEdit, QTextEdit, QTabWidget,
+                                     QProgressBar, QLabel, QTableWidget, QWidget,
+                                     QTableWidgetItem)
+        from PyQt5.QtGui import QPixmap
+        from PyQt5.QtCore import Qt
         if len(args) < 2:
             raise MiniError("uiset 需要 2 个参数：(组件id, 值)")
         wid = self._ui_id(args, "uiset")
@@ -1498,79 +1604,79 @@ class Interp:
             raise MiniError("uiset 找不到组件 " + wid)
         w = self.ui_widgets[wid]
         val = args[1]
-        tk = self._ui_tk()
         try:
-            if isinstance(w, tk.Entry):
-                w.delete(0, "end"); w.insert(0, fmt(val))
-            elif isinstance(w, tk.Text):
-                w.delete("1.0", "end"); w.insert("1.0", fmt(val))
-            elif isinstance(w, tk.Checkbutton):
-                w._hx_var.set(1 if truth(val) else 0)
-            elif isinstance(w, tk.Frame) and hasattr(w, "_hx_var"):
-                w._hx_var.set(fmt(val))
-            elif w.winfo_class() == "TCombobox":
-                w.set(fmt(val))
-            elif w.winfo_class() == "Treeview":
-                w.delete(*w.get_children())
+            if isinstance(w, QLineEdit):
+                w.setText(fmt(val))
+            elif isinstance(w, QTextEdit):
+                w.setPlainText(fmt(val))
+            elif isinstance(w, QCheckBox):
+                w.setChecked(truth(val))
+            elif isinstance(w, QComboBox):
+                idx = w.findText(fmt(val))
+                if idx >= 0:
+                    w.setCurrentIndex(idx)
+            elif isinstance(w, QListWidget):
+                w.clear()
                 if isinstance(val, list):
-                    for row in val:
-                        if isinstance(row, list):
-                            w.insert("", "end", values=[fmt(x) for x in row])
-            elif w.winfo_class() == "TNotebook":
-                for i, tab_id in enumerate(w.tabs()):
-                    if w.tab(tab_id, "text") == fmt(val):
-                        w.select(tab_id); break
-            elif isinstance(w, tk.Scale):
-                w.set(float(val) if self._is_num(val) else 0)
-            elif isinstance(w, tk.Listbox):
-                w.delete(0, "end")
+                    for it in val:
+                        w.addItem(fmt(it))
+            elif isinstance(w, QSlider):
+                w.setValue(int(val) if self._is_num(val) else 0)
+            elif isinstance(w, QProgressBar):
+                pct = int(val) if self._is_num(val) else 0
+                w.setValue(max(0, min(100, pct)))
+            elif isinstance(w, QTabWidget):
+                for i in range(w.count()):
+                    if w.tabText(i) == fmt(val):
+                        w.setCurrentIndex(i)
+                        break
+            elif isinstance(w, QTableWidget):
+                w.setRowCount(0)
                 if isinstance(val, list):
-                    for it in val: w.insert("end", fmt(it))
-            elif isinstance(w, tk.Canvas) and hasattr(w, "_hx_rect"):
-                pct = float(val) if self._is_num(val) else 0
-                if pct < 0: pct = 0
-                if pct > 100: pct = 100
-                w._hx_value = pct
-                ww = w._hx_w * pct / 100.0
-                w.coords(w._hx_rect, 0, 0, ww, w._hx_h)
-            elif isinstance(w, tk.Canvas) and hasattr(w, "_hx_photo"):
-                # 载入图片
+                    for r in val:
+                        if isinstance(r, list):
+                            row = w.rowCount()
+                            w.insertRow(row)
+                            for c, cell in enumerate(r[:w.columnCount()]):
+                                w.setItem(row, c, QTableWidgetItem(fmt(cell)))
+            elif isinstance(w, QWidget) and hasattr(w, "_hx_group"):
+                for btn in w._hx_buttons:
+                    if btn.text() == fmt(val):
+                        btn.setChecked(True)
+                        break
+            elif isinstance(w, QWidget) and hasattr(w, "_hx_path"):
                 path = fmt(val)
+                w._hx_path = path
                 try:
-                    from PIL import Image, ImageTk
-                    img = Image.open(path)
-                    iw, ih = img.size
-                    ww = w._hx_w; hh = w._hx_h
-                    ratio = min(ww / iw, hh / ih)
-                    nw = max(1, int(iw * ratio)); nh = max(1, int(ih * ratio))
-                    img = img.resize((nw, nh), Image.LANCZOS)
-                    photo = ImageTk.PhotoImage(img)
-                    w.delete("all")
-                    w.create_image(ww / 2, hh / 2, image=photo)
-                    w._hx_photo = photo
-                    w._hx_path = path
-                except Exception as ex:
-                    w.delete("all")
-                    w.create_text(w._hx_w / 2, w._hx_h / 2, text="图片载入失败", fill="#dc2626")
-                    w._hx_path = path
-            elif isinstance(w, (tk.Label, tk.Button)):
-                w.configure(text=fmt(val))
+                    pix = QPixmap(path)
+                    if pix.isNull():
+                        w.setText("图片载入失败")
+                    else:
+                        scaled = pix.scaled(w._hx_w, w._hx_h,
+                                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        w.setPixmap(scaled)
+                        w._hx_pixmap = scaled
+                except Exception:
+                    w.setText("图片载入失败")
+            elif isinstance(w, (QLabel, QPushButton)):
+                w.setText(fmt(val))
         except Exception as ex:
             raise MiniError("uiset 失败：" + str(ex))
         return None
 
     def ui_run(self, args):
         self._ui_need_win("uirun")
+        app = _qt_app()
         self.ui_running = True
         err = None
         try:
-            self.ui_win_obj.update()
+            self.ui_win_obj.show()
             while True:
-                self.ui_win_obj.update()
+                app.processEvents()
                 self.poll_bg_tasks()
-                time.sleep(0.02)
+                time.sleep(0.01)
                 self._check_cb_errors()
-                if not self.ui_win_obj.winfo_exists():
+                if not self.ui_win_obj.isVisible():
                     break
         except MiniError as e:
             err = e
