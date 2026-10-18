@@ -3,7 +3,7 @@ t = "hi";
 b = true;
 arr = [1,2,3];
 d = {name:"hx"};
-print(s, t, b, arr, d, dar(s));
+print(s, t, b, arr, d, type(s));
 
 f() { x = 99; return x; }
 print("局部:", f());
