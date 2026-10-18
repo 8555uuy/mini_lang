@@ -1,0 +1,141 @@
+{
+  "fn": {
+    "prefix": "fn",
+    "body": [
+      "${1:name}(${2:args}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "定义函数"
+  },
+  "if": {
+    "prefix": "if",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "if 条件"
+  },
+  "ife": {
+    "prefix": "ife",
+    "body": [
+      "if (${1:condition}) {",
+      "\t$2",
+      "} else {",
+      "\t$0",
+      "}"
+    ],
+    "description": "if/else"
+  },
+  "while": {
+    "prefix": "while",
+    "body": [
+      "while (${1:condition}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "while 循环"
+  },
+  "for": {
+    "prefix": "for",
+    "body": [
+      "for (${1:i} = 0; $1 < ${2:n}; $1 += 1) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "C 风格 for 循环"
+  },
+  "try": {
+    "prefix": "try",
+    "body": [
+      "try {",
+      "\t$1",
+      "} catch (${2:e}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "异常处理"
+  },
+  "print": {
+    "prefix": "print",
+    "body": [
+      "print(${1});"
+    ],
+    "description": "输出"
+  },
+  "input": {
+    "prefix": "input",
+    "body": [
+      "${1:x} = input(\"${2:提示}\");"
+    ],
+    "description": "读一行输入"
+  },
+  "scanf": {
+    "prefix": "scanf",
+    "body": [
+      "scanf(\"${1:%d %d}\", ${2:a}, ${3:b});"
+    ],
+    "description": "格式输入"
+  },
+  "gwin": {
+    "prefix": "gwin",
+    "body": [
+      "gwin(${1:600}, ${2:400}, \"${3:窗口标题}\");"
+    ],
+    "description": "创建图形窗口"
+  },
+  "uiwin": {
+    "prefix": "uiwin",
+    "body": [
+      "uiwin(${1:400}, ${2:300}, \"${3:窗口标题}\");"
+    ],
+    "description": "创建 UI 窗口"
+  },
+  "uiwin-full": {
+    "prefix": "uiwin-full",
+    "body": [
+      "uiwin(${1:400}, ${2:300}, \"${3:窗口标题}\");",
+      "",
+      "uilabel(\"${4:lb}\", 20, 20, 100, 26, \"${5:标签}\");",
+      "uiinput(\"${6:inp}\", 130, 20, 240, 28);",
+      "uibtn(\"${7:btn}\", 20, 70, 100, 32, \"${8:按钮}\");",
+      "",
+      "on_click() {",
+      "\tprint(\"点击了\", uiget(\"$6\"));",
+      "}",
+      "uion(\"$7\", \"click\", on_click);",
+      "",
+      "uirun();"
+    ],
+    "description": "完整 UI 界面骨架"
+  },
+  "uion": {
+    "prefix": "uion",
+    "body": [
+      "uion(\"${1:id}\", \"${2|click,change,select|}\", ${3:handler});"
+    ],
+    "description": "绑定 UI 事件"
+  },
+  "bgrun": {
+    "prefix": "bgrun",
+    "body": [
+      "bg_run(${1:http_get}, \"${2:url}\", ${3:on_done});"
+    ],
+    "description": "后台异步任务"
+  },
+  "readfile": {
+    "prefix": "readfile",
+    "body": [
+      "${1:s} = readfile(\"${2:path}\");"
+    ],
+    "description": "读文件"
+  },
+  "writefile": {
+    "prefix": "writefile",
+    "body": [
+      "writefile(\"${1:path}\", \"${2:内容}\");"
+    ],
+    "description": "写文件"
+  }
+}

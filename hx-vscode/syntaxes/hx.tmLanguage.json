@@ -1,0 +1,82 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "HX",
+  "scopeName": "source.hx",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#builtins" },
+    { "include": "#functions" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        { "name": "comment.line.number-sign.hx", "match": "#.*$" }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.hx",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.hx", "match": "\\." },
+            { "name": "variable.other.interpolation.hx", "match": "\\$\\{[^}]*\\}" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.hx",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "name": "constant.character.escape.hx", "match": "\\." }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hx", "match": "\\b\\d+(\\.\\d+)?\\b" }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        { "name": "keyword.control.hx", "match": "\\b(if|else|while|for|break|continue|return|try|catch|del)\\b" },
+        { "name": "constant.language.hx", "match": "\\b(true|false|null)\\b" },
+        { "name": "keyword.operator.logical.hx", "match": "\\b(and|or|not)\\b" },
+        { "name": "invalid.deprecated.hx", "match": "\\b(let|fn|dar|elif)\\b" }
+      ]
+    },
+    "builtins": {
+      "patterns": [
+        { "name": "support.function.core.hx", "match": "\\b(print|input|scanf|help|len|push|keys|items|has|set|type|str|num|upper|lower|trim|split|join|min|max|abs|sqrt|sin|cos|tan|floor|ceil|round|random|range)\\b" },
+        { "name": "support.constant.hx", "match": "\\bPI\\b" },
+        { "name": "support.function.graphics.hx", "match": "\\b(gwin|gline|grect|gcircle|gtext|gclear|gsleep|gwaitkey|gwaitclick|gkeydown|gclick)\\b" },
+        { "name": "support.function.file.hx", "match": "\\b(readfile|writefile|appendfile|exists|files|openfile|openurl|runapp)\\b" },
+        { "name": "support.function.net.hx", "match": "\\b(http_get|http_download|bg_run|md5|sha256|unzip|zipinfo)\\b" },
+        { "name": "support.function.ui.hx", "match": "\\b(uiwin|uibtn|uilabel|uiheading|uiinput|uitext|uicheck|uiradio|uicombo|uilist|uirange|uiprogress|uiimage|uitable|uipanel|uiseparator|uitabs|uion|uiget|uiset|uirun)\\b" }
+      ]
+    },
+    "functions": {
+      "patterns": [
+        { "name": "entity.name.function.hx", "match": "\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()" }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.hx", "match": "==|!=|<=|>=|\\+=|-=|\\*=|/=|%=|&&|\\|\\||[+\\-*/%<>=!]" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.separator.hx", "match": "[;:,]" },
+        { "name": "punctuation.section.hx", "match": "[{}\\[\\]()]" }
+      ]
+    }
+  }
+}

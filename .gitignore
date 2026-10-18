@@ -5,3 +5,8 @@ __pycache__/
 venv/
 .DS_Store
 Thumbs.db
+
+# VS Code 扩展
+hx-vscode/node_modules/
+hx-vscode/out/
+hx-vscode/*.vsix
