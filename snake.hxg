@@ -1,0 +1,136 @@
+# HX 贪吃蛇
+# 方向键控制方向，按 R 重新开始
+# 建议用命令行运行：python hx.py snake.hxg
+
+GRID = 20;
+COLS = 20;
+ROWS = 20;
+W = GRID * COLS;
+TOP = 40;
+H = GRID * ROWS;
+
+snake = [];
+dx = 1;
+dy = 0;
+food_x = 5;
+food_y = 5;
+score = 0;
+alive = true;
+running = true;
+ate = false;
+
+push_front(arr, item) {
+  result = [item];
+  for (i = 0; i < len(arr); i += 1) {
+    push(result, arr[i]);
+  }
+  return result;
+}
+
+drop_last(arr) {
+  result = [];
+  for (i = 0; i < len(arr) - 1; i += 1) {
+    push(result, arr[i]);
+  }
+  return result;
+}
+
+new_food() {
+  food_x = floor(random() * COLS);
+  food_y = floor(random() * ROWS);
+}
+
+reset() {
+  snake = [[10, 10], [9, 10], [8, 10]];
+  dx = 1;
+  dy = 0;
+  score = 0;
+  alive = true;
+  new_food();
+}
+
+draw() {
+  gclear();
+  grect(0, 0, W, TOP + H, "black", "#16213e");
+  fx = food_x * GRID + GRID / 2;
+  fy = TOP + food_y * GRID + GRID / 2;
+  gcircle(fx, fy, GRID / 2 - 2, "#e94560", "#e94560");
+  for (i = 0; i < len(snake); i += 1) {
+    seg = snake[i];
+    x1 = seg[0] * GRID + 1;
+    y1 = TOP + seg[1] * GRID + 1;
+    x2 = seg[0] * GRID + GRID - 1;
+    y2 = TOP + seg[1] * GRID + GRID - 1;
+    if (i == 0) {
+      grect(x1, y1, x2, y2, "#4ec9b0", "#4ec9b0");
+    } else {
+      grect(x1, y1, x2, y2, "#2e8b57", "#2e8b57");
+    }
+  }
+  gtext(W / 2, TOP / 2, "分数: " + score, "#ffffff");
+}
+
+on_key(key) {
+  if (key == "Up" and dy == 0) { dx = 0; dy = -1; }
+  else if (key == "Down" and dy == 0) { dx = 0; dy = 1; }
+  else if (key == "Left" and dx == 0) { dx = -1; dy = 0; }
+  else if (key == "Right" and dx == 0) { dx = 1; dy = 0; }
+}
+
+gwin(W, TOP + H, "HX 贪吃蛇");
+gkeydown(on_key);
+reset();
+draw();
+
+while (running) {
+  delay = 150 - score * 5;
+  if (delay < 60) { delay = 60; }
+  gsleep(delay);
+
+  head = snake[0];
+  nx = head[0] + dx;
+  ny = head[1] + dy;
+  alive = true;
+
+  if (nx < 0 or nx >= COLS or ny < 0 or ny >= ROWS) {
+    alive = false;
+  }
+
+  if (alive) {
+    ate = (nx == food_x and ny == food_y);
+    limit = len(snake);
+    if (not ate) { limit = limit - 1; }
+    for (i = 0; i < limit; i += 1) {
+      if (snake[i][0] == nx and snake[i][1] == ny) {
+        alive = false;
+      }
+    }
+  }
+
+  if (alive) {
+    snake = push_front(snake, [nx, ny]);
+    if (ate) {
+      score += 1;
+      new_food();
+    } else {
+      snake = drop_last(snake);
+    }
+  }
+
+  draw();
+
+  if (not alive) {
+    gtext(W / 2, TOP + H / 2 - 40, "游戏结束", "#e94560");
+    gtext(W / 2, TOP + H / 2 + 10, "得分: " + score, "#f9ca24");
+    gtext(W / 2, TOP + H / 2 + 50, "按 R 重开，其他键退出", "#cccccc");
+    k = gwaitkey();
+    if (k == "r" or k == "R") {
+      reset();
+      draw();
+    } else {
+      running = false;
+    }
+  }
+}
+
+print("游戏结束，最终得分:", score);

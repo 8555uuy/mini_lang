@@ -204,6 +204,7 @@ runapp("notepad.exe");            # 启动程序
 hx.py                    解释器 + Tkinter 图形编码器（含小智 AI 助手）
 demo.hxg / t.hxg / f4.hxg / auto.hxg   示例程序
 graphics.hxg             图形绘制示例
+snake.hxg                贪吃蛇小游戏（演示按键事件）
 hx.ico                   .hxg 文件图标
 make_icon.py             图标生成脚本
 register_filetype.ps1    Windows 文件关联注册
