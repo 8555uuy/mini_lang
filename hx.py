@@ -1,8 +1,9 @@
-# MiniLang v2 —— 解释器 + Tkinter 编码器
+# MiniLang v2 —— 解释器 + 编码器
 # 语法：x = 1;  f(a,b){...}  if/else if/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
 import sys, re, os, math, json, threading, queue, time, subprocess, webbrowser
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
+import concurrent.futures, zipfile, hashlib
 
 KEYWORDS = {"let","if","else","elif","while","for","break","continue","del",
             "return","true","false","null","and","or","not","try","catch"}
@@ -340,6 +341,10 @@ class Native:
     def __init__(self,fn): self.fn=fn
 
 
+# 哨兵：表示后台任务没有返回值，回调应收到空参数表
+_BG_NO_RESULT = object()
+
+
 class Return(Exception):
     def __init__(self,value): self.value=value
 
@@ -390,6 +395,14 @@ class Interp:
         self.root=root; self.gwin=None; self.gcanvas=None; self._owns_gwin=False
         self._wait_key=None; self._wait_click=None; self._cb_errors=[]
         self.ui_win_obj=None; self.ui_widgets={}; self.ui_handlers={}; self.ui_running=False
+        # ===== 后台任务设施 =====
+        # 线程池：IO/计算在后台线程跑，不阻塞主线程
+        self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="hx-bg")
+        # 后台完成后的回调队列：元素为 (回调函数, 结果, 异常)，只在主线程 poll_bg_tasks 里取
+        self._bg_queue = queue.Queue()
+        # 后台任务句柄表：id -> Future（供 bg_status / bg_wait 查询）
+        self._bg_futures = {}
+        self._bg_next_id = 1
         g=self.globals
         g.define("type",Native(lambda a: typename(a[0])))
         g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
@@ -440,6 +453,13 @@ class Interp:
         g.define("openfile",Native(self.f_openfile))
         g.define("openurl",Native(self.f_openurl))
         g.define("runapp",Native(self.f_runapp))
+        g.define("http_get",Native(self.h_http_get))
+        g.define("http_download",Native(self.h_http_download))
+        g.define("md5",Native(self.h_md5))
+        g.define("sha256",Native(self.h_sha256))
+        g.define("unzip",Native(self.h_unzip))
+        g.define("zipinfo",Native(self.h_zipinfo))
+        g.define("bg_run",Native(self.h_bg_run))
         g.define("uiwin",Native(self.ui_win))
         g.define("uibtn",Native(self.ui_btn))
         g.define("uilabel",Native(self.ui_label))
@@ -635,12 +655,22 @@ class Interp:
 
     def g_sleep(self, args):
         ms = int(self._g_num(args[0],"gsleep","毫秒数")) if args else 10
+        remain = max(0, ms) / 1000.0
         try:
             if self.gwin is not None: self.gwin.update()
-            time.sleep(max(0, ms)/1000.0)
+            # 分片 sleep，每片处理一次后台回调，保证响应性
+            end = time.time() + remain
+            while True:
+                self.poll_bg_tasks()
+                left = end - time.time()
+                if left <= 0: break
+                time.sleep(min(left, 0.016))
+                if self.gwin is not None: self.gwin.update()
             if self.gwin is not None: self.gwin.update()
+        except MiniError:
+            raise
         except Exception:
-            time.sleep(max(0, ms)/1000.0)
+            if remain > 0: time.sleep(remain)
         self._check_cb_errors()
         return None
 
@@ -660,6 +690,43 @@ class Interp:
             msg = self._cb_errors[0]
             self._cb_errors.clear()
             raise MiniError(msg)
+
+    # ===== 后台任务泵 =====
+    def poll_bg_tasks(self):
+        """主线程每帧调用：把已完成的后台回调搬运到主线程执行。
+        回调里可以安全操作 UI（因为就在这里的主线程执行）。"""
+        while True:
+            try:
+                cb, result, err = self._bg_queue.get_nowait()
+            except queue.Empty:
+                break
+            if err is not None:
+                self._cb_errors.append(str(err))
+                continue
+            if cb is None:
+                continue
+            try:
+                self.call(cb, [result] if result is not _BG_NO_RESULT else [], 0)
+            except Exception as ex:
+                self._cb_errors.append(str(ex))
+        self._check_cb_errors()
+
+    def _submit_bg(self, fn, done_cb=None):
+        """把 fn 丢进线程池；完成后把 (done_cb, 结果, 异常) 放进队列，由主线程执行 done_cb。"""
+        def worker():
+            try:
+                r = fn()
+                self._bg_queue.put((done_cb, r, None))
+            except Exception as e:
+                self._bg_queue.put((done_cb, None, e))
+        fut = self._pool.submit(worker)
+        bid = self._bg_next_id
+        self._bg_next_id += 1
+        self._bg_futures[bid] = fut
+        # 清理已完成的句柄
+        for k in [k for k, f in list(self._bg_futures.items()) if f.done() and k != bid]:
+            self._bg_futures.pop(k, None)
+        return bid
 
     def g_waitkey(self, args):
         if self.gwin is None:
@@ -839,6 +906,158 @@ class Interp:
         except Exception as e:
             raise MiniError("runapp 失败：" + str(e))
         return None
+
+    # ===== 网络（阻塞版，主线程用） =====
+    def _http_fetch(self, url, timeout=30, headers=None, max_bytes=None):
+        """同步 GET，返回 bytes。内部用，http_get / http_download 共用。"""
+        if not isinstance(url, str):
+            raise MiniError("网址必须是字符串，得到：" + fmt(url))
+        if not (url.startswith("http://") or url.startswith("https://")):
+            raise MiniError("网址必须以 http:// 或 https:// 开头")
+        req = urllib.request.Request(url, headers=headers or {
+            "User-Agent": "HX-Lang/2.0"
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read(max_bytes) if max_bytes else resp.read()
+                return data
+        except urllib.error.HTTPError as e:
+            raise MiniError("HTTP %d：%s" % (e.code, e.reason))
+        except urllib.error.URLError as e:
+            raise MiniError("网络错误：" + str(e.reason))
+        except Exception as e:
+            raise MiniError("请求失败：" + str(e))
+
+    def h_http_get(self, args):
+        if len(args) < 1:
+            raise MiniError("http_get 需要 1 个参数：网址")
+        url = args[0]
+        timeout = 30
+        if len(args) > 1 and self._is_num(args[1]):
+            timeout = int(args[1]) / 1000.0
+        data = self._http_fetch(url, timeout=timeout, max_bytes=10 * 1024 * 1024)
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return data.decode("utf-8", errors="replace")
+
+    def h_http_download(self, args):
+        if len(args) < 2:
+            raise MiniError("http_download 需要 2 个参数：网址, 保存路径")
+        url = args[0]
+        path = self._f_path(args[1], "http_download")
+        timeout = 60
+        if len(args) > 2 and self._is_num(args[2]):
+            timeout = int(args[2]) / 1000.0
+        d = os.path.dirname(os.path.abspath(path))
+        if d and not os.path.isdir(d):
+            os.makedirs(d, exist_ok=True)
+        data = self._http_fetch(url, timeout=timeout)
+        try:
+            with open(path, "wb") as f:
+                f.write(data)
+        except Exception as e:
+            raise MiniError("http_download 写文件失败：" + str(e))
+        return float(len(data))
+
+    # ===== 后台任务 =====
+    def h_bg_run(self, args):
+        """在后台线程执行一个内置 IO 函数，完成后在主线程调用回调。
+        用法：bg_run(函数, 参数..., [回调])"""
+        if len(args) < 1:
+            raise MiniError("bg_run 需要至少 1 个参数：函数, [参数...], [回调]")
+        fn = args[0]
+        if not isinstance(fn, Native):
+            raise MiniError("bg_run 的函数必须是内置 IO 函数（http_get / http_download / readfile / md5 / sha256 / unzip 等）")
+        rest = list(args[1:])
+        callback = None
+        if rest and isinstance(rest[-1], (Fn, Native)):
+            callback = rest.pop()
+        call_args = list(rest)
+
+        def worker():
+            return fn.fn(call_args)
+
+        self._submit_bg(worker, callback)
+        return None
+
+    # ===== 解压 / 哈希（Python 原型；接口与未来 C dll 一致） =====
+    def _h_path(self, v, fname):
+        if not isinstance(v, str):
+            raise MiniError(fname + " 的路径必须是字符串，得到：" + fmt(v))
+        return v
+
+    def h_md5(self, args):
+        if len(args) < 1:
+            raise MiniError("md5 需要 1 个参数：文件路径")
+        p = self._h_path(args[0], "md5")
+        h = hashlib.md5()
+        try:
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+        except FileNotFoundError:
+            raise MiniError("md5 失败：文件不存在 " + p)
+        except Exception as e:
+            raise MiniError("md5 失败：" + str(e))
+        return h.hexdigest()
+
+    def h_sha256(self, args):
+        if len(args) < 1:
+            raise MiniError("sha256 需要 1 个参数：文件路径")
+        p = self._h_path(args[0], "sha256")
+        h = hashlib.sha256()
+        try:
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+        except FileNotFoundError:
+            raise MiniError("sha256 失败：文件不存在 " + p)
+        except Exception as e:
+            raise MiniError("sha256 失败：" + str(e))
+        return h.hexdigest()
+
+    def h_unzip(self, args):
+        if len(args) < 2:
+            raise MiniError("unzip 需要 2 个参数：压缩包路径, 目标目录")
+        src = self._h_path(args[0], "unzip")
+        dst = self._h_path(args[1], "unzip")
+        if not os.path.isfile(src):
+            raise MiniError("unzip 失败：压缩包不存在 " + src)
+        os.makedirs(dst, exist_ok=True)
+        try:
+            with zipfile.ZipFile(src, "r") as zf:
+                # 防 Zip Slip：校验每个成员解压后仍在目标目录内
+                base = os.path.abspath(dst)
+                for name in zf.namelist():
+                    target = os.path.abspath(os.path.join(base, name))
+                    if not (target == base or target.startswith(base + os.sep)):
+                        raise MiniError("unzip 拒绝非法路径：" + name)
+                zf.extractall(dst)
+                return float(len(zf.namelist()))
+        except MiniError:
+            raise
+        except zipfile.BadZipFile:
+            raise MiniError("unzip 失败：不是有效的 zip 文件")
+        except Exception as e:
+            raise MiniError("unzip 失败：" + str(e))
+
+    def h_zipinfo(self, args):
+        if len(args) < 1:
+            raise MiniError("zipinfo 需要 1 个参数：压缩包路径")
+        src = self._h_path(args[0], "zipinfo")
+        if not os.path.isfile(src):
+            raise MiniError("zipinfo 失败：压缩包不存在 " + src)
+        try:
+            with zipfile.ZipFile(src, "r") as zf:
+                out = []
+                for info in zf.infolist():
+                    out.append([info.filename, float(info.file_size)])
+                return out
+        except zipfile.BadZipFile:
+            raise MiniError("zipinfo 失败：不是有效的 zip 文件")
+        except Exception as e:
+            raise MiniError("zipinfo 失败：" + str(e))
 
     # ===== UI 运行时 =====
     def _ui_need_win(self, fname):
@@ -1348,6 +1567,7 @@ class Interp:
             self.ui_win_obj.update()
             while True:
                 self.ui_win_obj.update()
+                self.poll_bg_tasks()
                 time.sleep(0.02)
                 self._check_cb_errors()
                 if not self.ui_win_obj.winfo_exists():
@@ -1701,6 +1921,20 @@ CHEATSHEET = {
   "gkeydown(on_key);        按键回调，函数收到键名参数",
   "gclick(on_click);        点击回调，函数收到 x, y 参数",
 ],
+"网络与后台": [
+  'http_get(url, 超时毫秒?)        同步 GET，返回文本',
+  'http_download(url, 路径, 超时?) 同步下载，返回字节数',
+  'bg_run(fn, 参数..., 回调)       后台执行内置 IO 函数，完成后主线程调回调',
+  '  例：bg_run(http_get, "https://x", on_done)',
+  '  注意：后台只跑内置 IO（http_get/readfile/md5 等），不能操作 UI',
+  '  回调里可以安全操作 UI（在主线程执行）',
+],
+"压缩与哈希": [
+  'md5(路径)              文件 MD5',
+  'sha256(路径)           文件 SHA256',
+  'zipinfo(路径)          返回 [[名称, 大小], ...]',
+  'unzip(路径, 目标目录)  解压 zip，返回文件数（防 Zip Slip）',
+],
 "文件与系统": [
   'readfile("a.txt")        读取整个文件（UTF-8）',
   'writefile("a.txt", s)    写入文件（覆盖）',
@@ -1714,7 +1948,7 @@ CHEATSHEET = {
 "注释": ["# 这一行是注释"],
 }
 
-CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","界面","图形","交互","文件与系统","注释"]
+CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","界面","图形","交互","网络与后台","压缩与哈希","文件与系统","注释"]
 
 def cheatsheet_text():
     lines = []
