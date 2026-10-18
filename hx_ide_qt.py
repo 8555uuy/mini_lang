@@ -909,7 +909,23 @@ for (i = 0; i < 5; i += 1) {
                           "HX Studio\nHX 语言集成开发环境\n\nPyQt5 版\n内置小智 AI 助手")
 
     def open_designer(self):
-        QMessageBox.information(self, "提示", "UI 设计器（PyQt5 版）正在迁移，当前可用 tkinter 版：python hx.py")
+        try:
+            import hx_designer_qt
+        except ImportError as e:
+            QMessageBox.warning(self, "提示", "找不到 hx_designer_qt.py：" + str(e))
+            return
+        ed = self._current_editor()
+        items = []
+        if ed:
+            m = hx()
+            items = m.ui_parse_code(ed.toPlainText())
+        dlg = hx_designer_qt.DesignerDialog(self, initial_items=items)
+        dlg.exec_()
+        if dlg.result_code and ed:
+            cursor = ed.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText("\n" + dlg.result_code + "\n")
+            self.st_msg.setText("已插入 %d 个组件的代码" % len(dlg.items))
 
 
 def build_gui_qt(initial_path=None):
