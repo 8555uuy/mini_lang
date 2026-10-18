@@ -95,6 +95,19 @@ class Parser:
         while not self.at("eof"): body.append(self.stmt())
         return ("block",body,1)
 
+    def _is_fn_def(self):
+        if self.peek().k!="id" or self.peek(1).k!="(":
+            return False
+        depth=0; i=1
+        while True:
+            t=self.peek(i)
+            if t.k=="eof": return False
+            if t.k=="(": depth+=1
+            elif t.k==")":
+                depth-=1
+                if depth==0: return self.peek(i+1).k=="{"
+            i+=1
+
     def block(self):
         t=self.take("{")
         body=[]
@@ -111,6 +124,13 @@ class Parser:
         if t.k=="id" and t.v=="print" and self.peek(1).k!="(":
             raise SyntaxError("第 %d 行：print 必须加括号，写成 print(...)" % line)
         if self.eat("fn"):
+            name=self.take("id").v; self.take("("); ps=[]
+            while not self.at(")"):
+                ps.append(self.take("id").v)
+                if not self.eat(","): break
+            self.take(")")
+            return ("fn",name,ps,self.block(),line)
+        if self._is_fn_def():
             name=self.take("id").v; self.take("("); ps=[]
             while not self.at(")"):
                 ps.append(self.take("id").v)
@@ -666,8 +686,9 @@ CHEATSHEET = {
   'help()               打印语法速查',
 ],
 "函数": [
-  "fn add(a, b) { return a + b; }",
-  "递归：fn fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); }",
+  "add(a, b) { return a + b; }     定义函数（C 风格，无 fn）",
+  "递归：fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); }",
+  "fn add(a, b) { ... }            旧写法仍兼容",
 ],
 "控制流": [
   "if (c) { ... } else { ... }",
@@ -729,11 +750,11 @@ def cheatsheet_text():
     return "\n".join(lines)
 
 SAMPLE = '''# HX 语言示例：print(...) 直接输出
-fn fib(n) {
+fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
 }
-fn add(a, b) { return a + b; }
+add(a, b) { return a + b; }
 
 print("fib(10) =", fib(10));
 print("add(3,4) =", add(3, 4));
@@ -807,7 +828,7 @@ AI_SYSTEM_PROMPT = (
     "你叫小智，是 HX 语言（源文件后缀 .hxg）的编程向导，帮助用户在 HX 语言的编程世界里闯荡。\n\n"
     "HX 语言语法要点：\n"
     "- 变量直接赋值即声明，自动推断类型：x = 10;  s = \"hi\";  arr = [1,2,3];  d = {a:1};\n"
-    "- 函数：fn add(a, b) { return a + b; }\n"
+    "- 函数（C 风格）：add(a, b) { return a + b; }  旧写法 fn add(a,b){} 仍兼容\n"
     "- 条件：if (c) { } else if (c2) { } else { }（没有 elif）\n"
     "- 循环：while (c) { }  /  for (x in arr) { }  /  for (i = 0; i < n; i += 1) { }\n"
     "- 异常：try { } catch (e) { }\n"

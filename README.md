@@ -35,8 +35,8 @@ s = "hello";
 arr = [1, 2, 3];
 d = {name: "hx", ver: 3};
 
-# 函数
-fn fib(n) {
+# 函数（C 风格）
+fib(n) {
   if (n < 2) { return n; }
   return fib(n - 1) + fib(n - 2);
 }
