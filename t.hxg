@@ -14,4 +14,4 @@ while (true) { i += 1; if (i > 3) { break; } }
 print("i =", i, "i>3 =", i > 3);
 print(upper("abc"), trim("  hi  "), join("-", ["a","b"]), max([3,9,2]));
 z = d;
-print("dar(z) =", dar(z));
+print("type(z) =", type(z));
