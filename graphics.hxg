@@ -1,0 +1,43 @@
+# HX 图形演示：用代码画出图形
+# 运行后弹出一个图形窗口
+
+gwin(600, 450);
+
+# 天空背景
+grect(0, 0, 600, 450, "white", "lightcyan");
+
+# 太阳
+gcircle(480, 80, 50, "orange", "gold");
+i = 0;
+while (i < 12) {
+  a = i * PI / 6;
+  gline(480 + cos(a) * 60, 80 + sin(a) * 60,
+        480 + cos(a) * 85, 80 + sin(a) * 85, "orange", 3);
+  i += 1;
+}
+
+# 草地
+grect(0, 330, 600, 450, "green", "palegreen");
+
+# 房子
+grect(120, 220, 280, 330, "black", "wheat");
+grect(185, 270, 215, 330, "brown", "saddlebrown");
+gcircle(200, 300, 3, "black", "black");
+gline(120, 220, 200, 160, "black", 3);
+gline(200, 160, 280, 220, "black", 3);
+
+# 树
+grect(430, 250, 450, 330, "brown", "saddlebrown");
+gcircle(440, 230, 40, "darkgreen", "forestgreen");
+
+# 标题
+gtext(230, 40, "HX Graphics", "navy");
+
+# 用循环画栅栏
+x = 320;
+while (x < 400) {
+  gline(x, 300, x, 340, "saddlebrown", 4);
+  x += 20;
+}
+
+print("图形绘制完成！");

@@ -10,6 +10,7 @@
 - **异常处理**：`try { ... } catch (e) { ... }`
 - **字符串插值**：`"hi ${x}!"`
 - **丰富数据结构**：数组、字典、函数、闭包
+- **内置图形绘制**：`gwin` / `gline` / `grect` / `gcircle` / `gtext`，用代码画图
 - **图形编码器**：语法高亮、行号、错误红色波浪线、单步调试、变量观察
 
 ## 快速开始
@@ -89,6 +90,8 @@ print("x = ${x}, x+1 = ${x + 1}");
 | 字典 | `keys` `items` `has` `set` |
 | 字符串 | `upper` `lower` `trim` `split` `join` |
 | 转换 | `str` `num` |
+| 数学 | `sqrt` `sin` `cos` `tan` `floor` `ceil` `round` `random` `PI` |
+| 图形 | `gwin` `gline` `grect` `gcircle` `gtext` `gclear` `gsleep` |
 
 ## 文件关联（可选）
 
@@ -101,6 +104,21 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 撤销：`unregister_filetype.ps1`
 
 图标文件 `hx.ico` 由 `make_icon.py` 生成（需要 Pillow）。
+
+## 图形绘制
+
+用代码画图，无需额外依赖（基于 tkinter）：
+
+```hx
+gwin(600, 400);                          # 创建窗口
+grect(0, 0, 600, 400, "white", "lightcyan");
+gcircle(300, 200, 80, "orange", "gold"); # 圆
+gline(50, 350, 550, 350, "blue", 3);     # 线
+gtext(250, 50, "Hello!", "navy");        # 文字
+gsleep(500);                             # 刷新并暂停
+```
+
+完整示例见 `graphics.hxg`。
 
 ## 内置 AI 助手「小智」
 
@@ -116,6 +134,7 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 ```
 hx.py                    解释器 + Tkinter 图形编码器（含小智 AI 助手）
 demo.hxg / t.hxg / f4.hxg / auto.hxg   示例程序
+graphics.hxg             图形绘制示例
 hx.ico                   .hxg 文件图标
 make_icon.py             图标生成脚本
 register_filetype.ps1    Windows 文件关联注册

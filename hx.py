@@ -1,7 +1,7 @@
 # MiniLang v2 —— 解释器 + Tkinter 编码器
 # 语法：x = 1;  fn f(a,b){...}  if/else if/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
-import sys, re, os, math, json, threading, queue
+import sys, re, os, math, json, threading, queue, time
 import urllib.request, urllib.error
 
 KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
@@ -361,9 +361,10 @@ def to_num(v):
 
 
 class Interp:
-    def __init__(self):
+    def __init__(self, root=None):
         self.globals=Env(); self.env=self.globals
         self.outbuf=[]; self.steps=0; self.maxsteps=300000; self.trace=[]; self.ask_fn=None
+        self.root=root; self.gwin=None; self.gcanvas=None; self._owns_gwin=False
         g=self.globals
         g.define("dar",Native(lambda a: typename(a[0])))
         g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
@@ -378,6 +379,15 @@ class Interp:
         g.define("min",Native(lambda a: min(a[0]) if len(a)==1 and isinstance(a[0],list) else min(a)))
         g.define("max",Native(lambda a: max(a[0]) if len(a)==1 and isinstance(a[0],list) else max(a)))
         g.define("abs",Native(lambda a: abs(a[0])))
+        g.define("sqrt",Native(lambda a: math.sqrt(a[0])))
+        g.define("sin",Native(lambda a: math.sin(a[0])))
+        g.define("cos",Native(lambda a: math.cos(a[0])))
+        g.define("tan",Native(lambda a: math.tan(a[0])))
+        g.define("floor",Native(lambda a: float(math.floor(a[0]))))
+        g.define("ceil",Native(lambda a: float(math.ceil(a[0]))))
+        g.define("round",Native(lambda a: float(round(a[0]))))
+        g.define("random",Native(lambda a: __import__("random").random()))
+        g.define("PI",3.141592653589793)
         g.define("input",Native(lambda a: (self.out(fmt(a[0])) if a else None, self.ask())[1]))
         g.define("print",Native(lambda a: self.out(" ".join(fmt(x) for x in a)+"\n")))
         g.define("len",Native(lambda a: len(a[0])))
@@ -386,6 +396,13 @@ class Interp:
         g.define("str",Native(lambda a: fmt(a[0])))
         g.define("num",Native(lambda a: to_num(a[0])))
         g.define("range",Native(lambda a: [float(x) for x in range(int(a[0]))]))
+        g.define("gwin",Native(lambda a: self.g_win(int(a[0]) if len(a)>0 else 640, int(a[1]) if len(a)>1 else 480)))
+        g.define("gline",Native(lambda a: self.g_canvas().create_line(a[0],a[1],a[2],a[3],fill=str(a[4]) if len(a)>4 else "black",width=float(a[5]) if len(a)>5 else 2)))
+        g.define("grect",Native(lambda a: self.g_canvas().create_rectangle(a[0],a[1],a[2],a[3],outline=str(a[4]) if len(a)>4 else "black",fill=str(a[5]) if len(a)>5 else "")))
+        g.define("gcircle",Native(lambda a: self.g_canvas().create_oval(a[0]-a[2],a[1]-a[2],a[0]+a[2],a[1]+a[2],outline=str(a[3]) if len(a)>3 else "black",fill=str(a[4]) if len(a)>4 else "")))
+        g.define("gtext",Native(lambda a: self.g_canvas().create_text(a[0],a[1],text=fmt(a[2]),fill=str(a[3]) if len(a)>3 else "black",font=("Microsoft YaHei UI",12))))
+        g.define("gclear",Native(lambda a: self.g_canvas().delete("all")))
+        g.define("gsleep",Native(lambda a: self.g_sleep(int(a[0]) if a else 10)))
 
     def ask(self):
         if self.ask_fn: return self.ask_fn()
@@ -394,6 +411,45 @@ class Interp:
 
     def text(self): return "".join(self.outbuf)
     def out(self,s): self.outbuf.append(s)
+
+    def g_win(self, w, h):
+        import tkinter as tk
+        if self.gwin is not None:
+            try: self.gwin.destroy()
+            except Exception: pass
+        if self.root is not None:
+            self.gwin = tk.Toplevel(self.root)
+        else:
+            self.gwin = tk.Tk()
+            self._owns_gwin = True
+        self.gwin.title("HX 图形窗口")
+        self.gwin.configure(bg="white")
+        self.gwin.geometry("%dx%d"%(w,h))
+        self.gcanvas = tk.Canvas(self.gwin,width=w,height=h,bg="white",highlightthickness=0)
+        self.gcanvas.pack(fill="both",expand=True)
+        try: self.gwin.update()
+        except Exception: pass
+        return None
+
+    def g_canvas(self):
+        if self.gcanvas is None:
+            raise MiniError("请先调用 gwin(w, h) 创建图形窗口")
+        return self.gcanvas
+
+    def g_sleep(self, ms):
+        try:
+            if self.gwin is not None: self.gwin.update()
+            time.sleep(max(0, ms)/1000.0)
+            if self.gwin is not None: self.gwin.update()
+        except Exception:
+            time.sleep(max(0, ms)/1000.0)
+        return None
+
+    def close_gwin(self):
+        if self.gwin is not None:
+            try: self.gwin.destroy()
+            except Exception: pass
+            self.gwin=None; self.gcanvas=None
 
     def mark(self,line):
         if len(self.trace)<3000:
@@ -628,6 +684,7 @@ CHEATSHEET = {
   "== != < <= > >=         比较",
   "+= -= *= /= %=          复合赋值",
   "x = 1                   赋值（分号可省，未声明则自动创建）",
+  "sqrt sin cos tan floor ceil round random   数学函数，PI 为圆周率",
 ],
 "数组": [
   "a = [1, 2, 3];",
@@ -648,10 +705,19 @@ CHEATSHEET = {
   '"hi ${x}!"             字符串插值，${表达式} 求值后拼接',
   'str(3)   num("4.5")     转字符串 / 转数字',
 ],
+"图形": [
+  "gwin(600, 400);          创建图形窗口（宽, 高）",
+  "gline(x1, y1, x2, y2, \"red\", 3);   画线（颜色、线宽可省）",
+  "grect(x1, y1, x2, y2, \"black\", \"skyblue\");  矩形，最后一个参数为空串则空心",
+  "gcircle(cx, cy, r, \"black\", \"yellow\");        圆",
+  "gtext(x, y, \"你好\", \"blue\");         在指定位置写字",
+  "gclear();                清空画面",
+  "gsleep(500);             暂停 500 毫秒并刷新（做动画）",
+],
 "注释": ["# 这一行是注释"],
 }
 
-CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","注释"]
+CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","图形","注释"]
 
 def cheatsheet_text():
     lines = []
@@ -748,6 +814,8 @@ AI_SYSTEM_PROMPT = (
     "- 字符串插值：\"hi \u0024{x}\"\n"
     "- print 必须加括号：print(\"hi\", 1);\n"
     "- 内置：dar(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
+    "- 图形：gwin(w,h) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
+    "gcircle(cx,cy,r,color,fill)、gtext(x,y,text,color)、gclear()、gsleep(ms) 刷新并暂停\n"
     "- 注释用 #，语句末尾分号可省\n\n"
     "回答要简洁、直接给可运行的 HX 代码，用 " + FENCE + "hxg 代码块包裹。"
 )
@@ -1259,7 +1327,10 @@ def build_gui(initial_path=None):
 
     def do_run():
         src=ed.get("1.0","end")
-        it=Interp(); st["it"]=it; st["trace"]=[]; st["i"]=-1
+        if st["it"] is not None:
+            try: st["it"].close_gwin()
+            except Exception: pass
+        it=Interp(root); st["it"]=it; st["trace"]=[]; st["i"]=-1
         it.ask_fn=lambda: (simpledialog.askstring("HX 输入","请输入：",parent=root) or "")
         highlight_line(0); clear_error(); set_state("运行中…")
         try:
@@ -1397,5 +1468,8 @@ if __name__=="__main__":
         except (SyntaxError,MiniError) as e:
             sys.stdout.write(it.text()+str(e)+"\n"); sys.exit(1)
         sys.stdout.write(it.text())
+        if it.gwin is not None:
+            try: it.gwin.mainloop()
+            except Exception: pass
     else:
         build_gui()
