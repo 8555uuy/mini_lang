@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { runFile } from './runner';
 import { AgentPanel } from './agent/panel';
+import { ChatChannel } from './agent/chat';
 import { DesignerPanel } from './designer/panel';
 import { HxCompletionProvider, HxHoverProvider } from './providers';
 import { DiagnosticsManager } from './diagnostics';
@@ -10,6 +11,7 @@ import { HxDocumentSymbolProvider } from './symbols';
 import { ApiDocsProvider } from './api-docs-view';
 
 let agentPanel: AgentPanel | undefined;
+let chatChannel: ChatChannel | undefined;
 let designerPanel: DesignerPanel | undefined;
 
 /**
@@ -74,13 +76,33 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('hx.openAgent', () => {
-            if (agentPanel) {
+            // 优先 Webview 面板（体验最好）
+            try {
+                if (agentPanel) {
+                    agentPanel.reveal();
+                    return;
+                }
+                agentPanel = new AgentPanel(context);
+                agentPanel.onDidDispose(() => { agentPanel = undefined; });
                 agentPanel.reveal();
-                return;
+            } catch (e: any) {
+                // Webview 不可用（CodeGeeX 等衍生版），降级到 OutputChannel
+                vscode.window.showWarningMessage(
+                    'Webview 不可用，已切换到文字版小智。原因：' + (e.message || String(e))
+                );
+                vscode.commands.executeCommand('hx.openAgentText');
             }
-            agentPanel = new AgentPanel(context);
-            agentPanel.onDidDispose(() => { agentPanel = undefined; });
-            agentPanel.reveal();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('hx.openAgentText', async () => {
+            // 文字版小智：OutputChannel + InputBox
+            if (!chatChannel) {
+                chatChannel = new ChatChannel(context);
+                context.subscriptions.push({ dispose: () => chatChannel && chatChannel.dispose() });
+            }
+            await chatChannel.start();
         })
     );
 

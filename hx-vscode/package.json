@@ -14,7 +14,9 @@
     "onCommand:hx.openAgent",
     "onCommand:hx.openDesigner",
     "onCommand:hx.setApiKey",
-    "onCommand:hx.cheatsheet"
+    "onCommand:hx.cheatsheet",
+    "onCommand:hx.openAgentText",
+    "onView:hx.apiDocs"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -49,6 +51,10 @@
         "command": "hx.openAgent",
         "title": "HX: 打开小智",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "hx.openAgentText",
+        "title": "HX: 打开小智（文字版）"
       },
       {
         "command": "hx.openDesigner",
