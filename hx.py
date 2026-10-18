@@ -123,6 +123,16 @@ class Parser:
             raise SyntaxError("第 %d 行：let 声明已废弃，请直接写 x = 1;（自动判断类型）" % line)
         if t.k=="id" and t.v=="print" and self.peek(1).k!="(":
             raise SyntaxError("第 %d 行：print 必须加括号，写成 print(...)" % line)
+        if t.k=="id" and t.v=="scanf":
+            self.take(); self.take("(")
+            fmt_node=self.expr(); self.take(",")
+            names=[]
+            while not self.at(")"):
+                names.append(self.take("id").v)
+                if not self.eat(","): break
+            self.take(")")
+            self.end()
+            return ("scanf",fmt_node,names,line)
         if t.k=="id" and t.v=="fn":
             raise SyntaxError("第 %d 行：没有 fn 关键字，直接写 名字(参数) { ... }" % line)
         if self._is_fn_def():
@@ -434,6 +444,76 @@ class Interp:
         if self.ask_fn: return self.ask_fn()
         try: return input()
         except Exception: return ""
+
+    def _read_line(self, prompt):
+        if prompt:
+            self.out(prompt)
+        return self.ask()
+
+    def do_scanf(self, fmt_node, names, line):
+        fmt = fmt_node[1] if fmt_node[0] == "str" else fmt(fmt_node)
+        # 拆分格式串：每遇到一个 %d/%f/%s/%c 就是一次读取
+        specs = []
+        i = 0
+        n = len(fmt)
+        while i < n:
+            if fmt[i] == "%" and i + 1 < n:
+                t = fmt[i+1]
+                if t in "dfsc":
+                    specs.append(t)
+                    i += 2
+                    continue
+                if t == "%":
+                    i += 2
+                    continue
+            i += 1
+        if not specs:
+            raise MiniError("第 %d 行：scanf 的格式串里没有 %%d/%%f/%%s/%%c" % line)
+        if len(specs) != len(names):
+            raise MiniError("第 %d 行：scanf 格式串有 %d 个占位符，但给了 %d 个变量"
+                            % (line, len(specs), len(names)))
+        # 检查变量都已声明
+        for nm in names:
+            try:
+                self.env.get(nm)
+            except NameError:
+                raise MiniError("第 %d 行：scanf 的变量 %s 未声明，请先写 %s = 0;" % (line, nm, nm))
+        # 读取：优先用一次输入切分，若字段不够则继续读
+        values = []
+        prompt_shown = False
+        while len(values) < len(specs):
+            prompt = ""
+            if not prompt_shown:
+                prompt = ""
+                prompt_shown = True
+            raw = self._read_line(prompt)
+            parts = raw.split()
+            for p in parts:
+                if len(values) >= len(specs):
+                    break
+                values.append(p)
+            if not parts and len(values) < len(specs):
+                continue
+        # 按类型转换并赋值
+        for idx, nm in enumerate(names):
+            spec = specs[idx]
+            v = values[idx]
+            if spec == "d":
+                try:
+                    iv = int(float(v))
+                except Exception:
+                    raise MiniError("第 %d 行：scanf 需要整数，得到 \"%s\"" % (line, v))
+                self.env.set(nm, float(iv))
+            elif spec == "f":
+                try:
+                    self.env.set(nm, float(v))
+                except Exception:
+                    raise MiniError("第 %d 行：scanf 需要数字，得到 \"%s\"" % (line, v))
+            elif spec == "c":
+                self.env.set(nm, v[0] if v else "")
+            else:
+                self.env.set(nm, v)
+        return None
 
     def text(self): return "".join(self.outbuf)
     def out(self,s): self.outbuf.append(s)
@@ -799,6 +879,8 @@ class Interp:
                 try: self.ex(n[2])
                 except BreakSig: break
                 except ContinueSig: continue
+        elif k=="scanf":
+            self.do_scanf(n[1], n[2], n[-1])
         elif k=="forc":
             _,init,cond,step,body,ln=n
             if init is not None: self.ev(init)
@@ -989,7 +1071,9 @@ CHEATSHEET = {
 "输出与输入": [
   'print("hi", 1);     输出，多参数用空格分隔',
   'print();             无参数输出一个空行',
-  'input("提示")        读一行输入（命令行）',
+  'input("提示")        读一行输入，返回字符串',
+  'scanf("%d %d", a, b) 按格式读入多个值（变量需先声明）',
+  '  格式：%d 整数  %f 数字  %s 字符串  %c 单字符',
   'help()               打印语法速查',
 ],
 "函数": [
@@ -1160,6 +1244,7 @@ AI_SYSTEM_PROMPT = (
     "- 异常：try { } catch (e) { }\n"
     "- 字符串插值：\"hi \u0024{x}\"\n"
     "- print 必须加括号：print(\"hi\", 1);\n"
+    "- 输入：input(\"提示\") 返回字符串；scanf(\"%d %d\", a, b) 按格式读入（变量需先声明）\n"
     "- 内置：type(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
     "- 逻辑运算：&& || ! （也支持 and or not）\n"
     "- 图形：gwin(w,h,title) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
@@ -1546,23 +1631,65 @@ def build_gui(initial_path=None):
     ptab_var.pack(side="left")
     ptab_prob=tk.Label(panel_tabs,text="问题",bg=PANEL_HEAD,fg=FG_DIM,font=UI_FONT,padx=14,pady=6,cursor="hand2")
     ptab_prob.pack(side="left")
+    ptab_inp=tk.Label(panel_tabs,text="输入",bg=PANEL_HEAD,fg=FG_DIM,font=UI_FONT,padx=14,pady=6,cursor="hand2")
+    ptab_inp.pack(side="left")
 
     out=tk.Text(panel_stack,font=("Consolas",11),state="disabled",wrap="word",bg=PANEL,fg=FG,insertbackground=FG,relief="flat",bd=0,padx=14,pady=8,highlightthickness=0)
     var=tk.Text(panel_stack,font=("Consolas",11),state="disabled",wrap="none",bg=PANEL,fg=FG,insertbackground=FG,relief="flat",bd=0,padx=14,pady=8,highlightthickness=0)
     prob=tk.Text(panel_stack,font=("Consolas",11),state="disabled",wrap="word",bg=PANEL,fg=FG,insertbackground=FG,relief="flat",bd=0,padx=14,pady=8,highlightthickness=0)
     prob.tag_configure("err",foreground=ERR_RED)
 
+    inp_panel=tk.Frame(panel_stack,bg=PANEL)
+    inp_log=tk.Text(inp_panel,font=("Consolas",10),state="disabled",wrap="word",bg=PANEL,fg="#a0a0a0",relief="flat",bd=0,padx=14,pady=6,highlightthickness=0,height=3)
+    inp_log.pack(fill="both",expand=True)
+    inp_log.tag_configure("prompt",foreground="#9cdcfe")
+    inp_log.tag_configure("value",foreground="#b5cea8")
+    inp_row=tk.Frame(inp_panel,bg=PANEL)
+    inp_row.pack(fill="x",padx=14,pady=(0,8))
+    inp_entry=tk.Entry(inp_row,font=("Consolas",11),bg="#3c3c3c",fg=FG,insertbackground=FG,relief="flat",bd=0,highlightthickness=0)
+    inp_entry.pack(side="left",fill="x",expand=True,ipady=6)
+    inp_send=tk.Button(inp_row,text="发送",command=lambda: gui_input_submit(),bg=ACCENT,fg="#ffffff",activebackground=ACCENT_HOVER,activeforeground="#ffffff",relief="flat",bd=0,padx=14,pady=4,cursor="hand2",font=UI_FONT,highlightthickness=0,width=6)
+    inp_send.pack(side="left",padx=(8,0))
+
+    input_queue=queue.Queue()
+    input_result={"waiting":False}
+
+    def inp_log_append(text,tag=None):
+        inp_log.configure(state="normal")
+        if tag: inp_log.insert("end",text,tag)
+        else: inp_log.insert("end",text)
+        inp_log.see("end"); inp_log.configure(state="disabled")
+
+    def gui_input_submit():
+        val=inp_entry.get()
+        inp_entry.delete(0,"end")
+        inp_log_append(val+"\n","value")
+        if input_result["waiting"]:
+            input_queue.put(val)
+
+    def gui_input_done():
+        inp_send.configure(state="disabled",bg="#3a3a3d")
+        ptab_inp.configure(fg=FG_DIM)
+
+    def gui_input_begin():
+        inp_send.configure(state="normal",bg=ACCENT)
+        ptab_inp.configure(fg="#ffffff")
+        inp_entry.focus_set()
+
+    inp_entry.bind("<Return>",lambda e:(gui_input_submit(),"break")[1])
+
     panel_tab_state={"active":"out"}
     def switch_panel(which):
         panel_tab_state["active"]=which
-        out.pack_forget(); var.pack_forget(); prob.pack_forget()
-        for lbl,w in [(ptab_out,"out"),(ptab_var,"var"),(ptab_prob,"prob")]:
+        out.pack_forget(); var.pack_forget(); prob.pack_forget(); inp_panel.pack_forget()
+        for lbl,w in [(ptab_out,"out"),(ptab_var,"var"),(ptab_prob,"prob"),(ptab_inp,"inp")]:
             if w==which: lbl.configure(fg="#ffffff",bg=PANEL)
             else: lbl.configure(fg=FG_DIM,bg=PANEL_HEAD)
-        {"out":out,"var":var,"prob":prob}[which].pack(fill="both",expand=True)
+        {"out":out,"var":var,"prob":prob,"inp":inp_panel}[which].pack(fill="both",expand=True)
     ptab_out.bind("<Button-1>",lambda e: switch_panel("out"))
     ptab_var.bind("<Button-1>",lambda e: switch_panel("var"))
     ptab_prob.bind("<Button-1>",lambda e: switch_panel("prob"))
+    ptab_inp.bind("<Button-1>",lambda e: switch_panel("inp"))
     switch_panel("out")
 
     tk.Frame(root,bg=BORDER,height=1).pack(fill="x")
@@ -1636,7 +1763,25 @@ def build_gui(initial_path=None):
             try: st["it"].close_gwin()
             except Exception: pass
         it=Interp(root); st["it"]=it; st["trace"]=[]; st["i"]=-1
-        it.ask_fn=lambda: (simpledialog.askstring("HX 输入","请输入：",parent=root) or "")
+        def gui_ask():
+            switch_panel("inp")
+            input_result["waiting"]=True
+            gui_input_begin()
+            while True:
+                try:
+                    val=input_queue.get_nowait()
+                    input_result["waiting"]=False
+                    return val
+                except queue.Empty:
+                    pass
+                root.update()
+                time.sleep(0.02)
+        it.ask_fn=gui_ask
+        inp_log.configure(state="normal"); inp_log.delete("1.0","end"); inp_log.configure(state="disabled")
+        input_result["waiting"]=False
+        try:
+            while True: input_queue.get_nowait()
+        except queue.Empty: pass
         highlight_line(0); clear_error(); set_state("运行中…")
         try: prog=Parser(tokenize(src)).program()
         except SyntaxError as e:
@@ -1933,6 +2078,8 @@ if __name__=="__main__":
         build_gui(edit_path)
     elif args:
         try: sys.stdout.reconfigure(encoding="utf-8")
+        except Exception: pass
+        try: sys.stdin.reconfigure(encoding="utf-8")
         except Exception: pass
         with open(args[0],encoding="utf-8") as f: src=f.read()
         it=Interp()
