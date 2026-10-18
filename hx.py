@@ -4,10 +4,10 @@
 import sys, re, os, math, json, threading, queue, time, subprocess, webbrowser
 import urllib.request, urllib.error
 
-KEYWORDS = {"let","dar","if","else","elif","while","for","break","continue","del",
+KEYWORDS = {"let","if","else","elif","while","for","break","continue","del",
             "return","true","false","null","and","or","not","try","catch"}
-OPS = ["==","!=","<=",">=","+=","-=","*=","/=","%=","+","-","*","/","%","<",">","=",
-       "(",")","{","}","[","]",",",";",":","."]
+OPS = ["==","!=","<=",">=","+=","-=","*=","/=","%=","&&","||","+","-","*","/","%","<",">","=",
+       "(",")","{","}","[","]",",",";",":",".","!"]
 
 class MiniError(Exception):
     pass
@@ -119,8 +119,8 @@ class Parser:
 
     def stmt(self):
         t=self.peek(); line=t.line
-        if t.k=="let" or (t.k=="dar" and self.peek(1).k!="("):
-            raise SyntaxError("第 %d 行：%s 声明已废弃，请直接写 x = 1;（自动判断类型）" % (line,t.k))
+        if t.k=="let":
+            raise SyntaxError("第 %d 行：let 声明已废弃，请直接写 x = 1;（自动判断类型）" % line)
         if t.k=="id" and t.v=="print" and self.peek(1).k!="(":
             raise SyntaxError("第 %d 行：print 必须加括号，写成 print(...)" % line)
         if t.k=="id" and t.v=="fn":
@@ -188,18 +188,18 @@ class Parser:
 
     def or_(self):
         node=self.and_()
-        while self.eat("or"):
+        while self.eat("or") or self.eat("||"):
             node=("bin","or",node,self.and_(),node[-1])
         return node
 
     def and_(self):
         node=self.not_()
-        while self.eat("and"):
+        while self.eat("and") or self.eat("&&"):
             node=("bin","and",node,self.not_(),node[-1])
         return node
 
     def not_(self):
-        if self.at("not"):
+        if self.at("not","!"):
             line=self.take().line
             return ("un","not",self.not_(),line)
         return self.cmp()
@@ -271,9 +271,9 @@ class Parser:
         if t.k=="true": self.take(); return ("bool",True,t.line)
         if t.k=="false": self.take(); return ("bool",False,t.line)
         if t.k=="null": self.take(); return ("null",None,t.line)
-        if t.k=="dar" and self.peek(1).k!="(":
-            raise SyntaxError("第 %d 行：dar 声明已废弃，请直接写 x = 1;（自动判断类型）" % t.line)
-        if t.k=="id" or t.k=="dar":
+        if t.k=="id" and t.v=="dar":
+            raise SyntaxError("第 %d 行：dar 已改名为 type，请用 type(x) 查询类型" % t.line)
+        if t.k=="id":
             self.take(); return ("id",t.v,t.line)
         if t.k=="(":
             self.take(); e=self.expr(); self.take(")"); return e
@@ -380,7 +380,7 @@ class Interp:
         self.root=root; self.gwin=None; self.gcanvas=None; self._owns_gwin=False
         self._wait_key=None; self._wait_click=None; self._cb_errors=[]
         g=self.globals
-        g.define("dar",Native(lambda a: typename(a[0])))
+        g.define("type",Native(lambda a: typename(a[0])))
         g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
         g.define("has",Native(lambda a: (a[1] in a[0]) if isinstance(a[0],(dict,list,str)) else False))
         g.define("set",Native(lambda a: (a[0].__setitem__(a[1],a[2]),a[0])[1]))
@@ -982,7 +982,7 @@ CHEATSHEET = {
 "变量": [
   "x = 10;              直接赋值，自动判断类型（无需声明）",
   'x = "hi";            同样自动识别 字符串/数组/字典/布尔 等',
-  "dar(x)               查询类型：数字/字符串/布尔/数组/字典/函数/空",
+  "type(x)              查询类型：数字/字符串/布尔/数组/字典/函数/空",
   "true / false / null  布尔与空值字面量",
   "注意：let / dar 声明写法已移除，直接写 x = 1;",
 ],
@@ -1006,7 +1006,7 @@ CHEATSHEET = {
   "遍历字典：ks = keys(d); for (i = 0; i < len(ks); i += 1) { print(ks[i]); }",
   "break;   continue;",
   "try { ... } catch (e) { ... }   捕获错误，e 为错误信息",
-  "and / or / not",
+  "and / or / not        也可写 && / || / !",
 ],
 "运算符": [
   "+ - * / %               算术",
@@ -1086,11 +1086,11 @@ print("fib(10) =", fib(10));
 print("add(3,4) =", add(3, 4));
 
 n = 42;
-print("dar(n) =", dar(n), "| n =", n);
+print("type(n) =", type(n), "| n =", n);
 s = "hi";
-print("dar(s) =", dar(s));
+print("type(s) =", type(s));
 arr2 = [1, 2];
-print("dar(arr2) =", dar(arr2));
+print("type(arr2) =", type(arr2));
 print("括号 print 更清晰");
 
 arr = [1, 2, 3];
@@ -1113,8 +1113,8 @@ print(s + "!" + 1);
 if (sum > 5 and true) { print("ok"); } else { print("bad"); }
 '''
 
-TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
-KW = {"dar","if","else","elif","while","for","break","continue","del","return","true","false","null","and","or","not","try","catch"}
+TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:if|elif|else|while|for|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help|type)\b')
+KW = {"if","else","elif","while","for","break","continue","del","return","true","false","null","and","or","not","try","catch"}
 
 
 def idx_of(txt,off):
@@ -1160,7 +1160,8 @@ AI_SYSTEM_PROMPT = (
     "- 异常：try { } catch (e) { }\n"
     "- 字符串插值：\"hi \u0024{x}\"\n"
     "- print 必须加括号：print(\"hi\", 1);\n"
-    "- 内置：dar(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
+    "- 内置：type(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
+    "- 逻辑运算：&& || ! （也支持 and or not）\n"
     "- 图形：gwin(w,h,title) 建窗口、gline(x1,y1,x2,y2,color,width)、grect(x1,y1,x2,y2,color,fill)、"
     "gcircle(cx,cy,r,color,fill)、gtext(x,y,text,color)、gclear()、gsleep(ms) 刷新并暂停\n"
     "- 交互：gwaitkey() 等按键返回键名、gwaitclick() 等点击返回 [x,y]、"
