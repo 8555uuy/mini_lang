@@ -9,11 +9,11 @@ print("fib(10) =", fib(10));
 print("add(3,4) =", add(3, 4));
 
 n = 42;
-print("dar(n) =", dar(n), "| n =", n);
+print("type(n) =", type(n), "| n =", n);
 s = "hi";
-print("dar(s) =", dar(s));
+print("type(s) =", type(s));
 arr2 = [1, 2];
-print("dar(arr2) =", dar(arr2));
+print("type(arr2) =", type(arr2));
 print("括号 print 更清晰");
 
 arr = [1, 2, 3];
