@@ -5,7 +5,7 @@
 ## 特性
 
 - **自动类型推断**：直接写 `x = 10;` 即可，无需声明类型
-- **带括号的控制流**：`if (...)` / `while (...)` / `for (...)`
+- **带括号的控制流**：`if (...)` / `else if (...)` / `while (...)` / `for (...)`
 - **两种 for 循环**：遍历式 `for (x in arr)` 与 C 式三段 `for (i = 0; i < n; i += 1)`
 - **异常处理**：`try { ... } catch (e) { ... }`
 - **字符串插值**：`"hi ${x}!"`
@@ -45,7 +45,7 @@ print("fib(10) =", fib(10));
 # 条件
 if (x > 5) {
   print("big");
-} elif (x > 0) {
+} else if (x > 0) {
   print("small");
 } else {
   print("zero or negative");
@@ -102,10 +102,19 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 
 图标文件 `hx.ico` 由 `make_icon.py` 生成（需要 Pillow）。
 
+## 内置 AI 助手「小智」
+
+编辑器右侧内置了 AI 编程向导「小智」，帮助你在 HX 语言的世界里闯荡。
+
+- 点击右上角 ⚙ 配置 API（支持 DeepSeek / Kimi / 通义 / 智谱 / Ollama 等 OpenAI 兼容服务）
+- 配置保存在 `%APPDATA%\HXLanguage\config.json`
+- 默认勾选「附带当前代码」，小智能直接看到你正在写的程序
+- 小智返回的代码块可双击下方「📋 双击此处插入代码」一键插入编辑器
+
 ## 项目结构
 
 ```
-hx.py                    解释器 + Tkinter 图形编码器
+hx.py                    解释器 + Tkinter 图形编码器（含小智 AI 助手）
 demo.hxg / t.hxg / f4.hxg / auto.hxg   示例程序
 hx.ico                   .hxg 文件图标
 make_icon.py             图标生成脚本

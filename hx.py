@@ -1,7 +1,8 @@
 # MiniLang v2 —— 解释器 + Tkinter 编码器
-# 语法：x = 1;  fn f(a,b){...}  if/elif/else  while  for  return
+# 语法：x = 1;  fn f(a,b){...}  if/else if/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
-import sys, re, os, math
+import sys, re, os, math, json, threading, queue
+import urllib.request, urllib.error
 
 KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
             "fn","return","true","false","null","and","or","not","try","catch"}
@@ -125,11 +126,8 @@ class Parser:
             then=self.stmt()
             els=self.stmt() if self.eat("else") else None
             return ("if",c,then,els,line)
-        if self.eat("elif"):
-            self.take("("); c=self.expr(); self.take(")")
-            then=self.stmt()
-            els=self.stmt() if self.eat("else") else None
-            return ("if",c,then,els,line)
+        if self.at("elif"):
+            raise SyntaxError("第 %d 行：没有 elif，请改用 else if" % line)
         if self.eat("try"):
             body=self.stmt()
             self.take("catch"); self.take("("); nm=self.take("id").v; self.take(")")
@@ -617,7 +615,7 @@ CHEATSHEET = {
 ],
 "控制流": [
   "if (c) { ... } else { ... }",
-  "elif (c) { ... }          多分支，接在 if/elif 之后",
+  "else if (c) { ... }       多分支，串在 else 后面（没有 elif）",
   "while (c) { ... }",
   "for (x in arr) { ... }     遍历 数组/字符串/字典(键)",
   "for (i = 0; i < n; i += 1) { ... }   C 式三段循环，三段均可省略",
@@ -735,6 +733,70 @@ LN_FONT=("Consolas",12)
 UI_FONT=("Microsoft YaHei UI",9)
 
 
+AI_CONFIG_DIR = os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "HXLanguage")
+AI_CONFIG_PATH = os.path.join(AI_CONFIG_DIR, "config.json")
+FENCE = chr(96) * 3
+
+AI_SYSTEM_PROMPT = (
+    "你叫小智，是 HX 语言（源文件后缀 .hxg）的编程向导，帮助用户在 HX 语言的编程世界里闯荡。\n\n"
+    "HX 语言语法要点：\n"
+    "- 变量直接赋值即声明，自动推断类型：x = 10;  s = \"hi\";  arr = [1,2,3];  d = {a:1};\n"
+    "- 函数：fn add(a, b) { return a + b; }\n"
+    "- 条件：if (c) { } else if (c2) { } else { }（没有 elif）\n"
+    "- 循环：while (c) { }  /  for (x in arr) { }  /  for (i = 0; i < n; i += 1) { }\n"
+    "- 异常：try { } catch (e) { }\n"
+    "- 字符串插值：\"hi \u0024{x}\"\n"
+    "- print 必须加括号：print(\"hi\", 1);\n"
+    "- 内置：dar(x) 查类型、len、push、min、max、abs、range、keys、items、has、set、upper、lower、trim、split、join、str、num、input、help\n"
+    "- 注释用 #，语句末尾分号可省\n\n"
+    "回答要简洁、直接给可运行的 HX 代码，用 " + FENCE + "hxg 代码块包裹。"
+)
+
+
+def ai_load_config():
+    try:
+        with open(AI_CONFIG_PATH, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {}
+    return {"base_url": cfg.get("base_url", ""),
+            "api_key": cfg.get("api_key", ""),
+            "model": cfg.get("model", "")}
+
+
+def ai_save_config(cfg):
+    try:
+        os.makedirs(AI_CONFIG_DIR, exist_ok=True)
+        with open(AI_CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def ai_chat(cfg, messages):
+    url = (cfg.get("base_url") or "").rstrip("/")
+    if not url:
+        raise ValueError("Base URL 未配置")
+    if not url.endswith("/chat/completions"):
+        url = url + "/chat/completions"
+    payload = {
+        "model": cfg.get("model") or "gpt-3.5-turbo",
+        "messages": [{"role": "system", "content": AI_SYSTEM_PROMPT}] + list(messages),
+        "temperature": 0.7,
+    }
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", "Bearer " + (cfg.get("api_key") or ""))
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        raw = resp.read().decode("utf-8", "replace")
+    body = json.loads(raw)
+    if "choices" not in body or not body["choices"]:
+        raise ValueError("响应格式异常：" + raw[:200])
+    return body["choices"][0]["message"]["content"]
+
+
 def build_gui(initial_path=None):
     import tkinter as tk
     from tkinter import filedialog, simpledialog
@@ -766,8 +828,21 @@ def build_gui(initial_path=None):
         b.pack(side="left",padx=2,pady=6)
         return b
 
+    # ---------- 主体布局：左侧（编辑器 + 底部）| 右侧（小智） ----------
+    body=tk.Frame(root,bg=BG)
+    body.pack(fill="both",expand=True)
+
+    ai_panel=tk.Frame(body,bg=PANEL,width=380)
+    ai_panel.pack(side="right",fill="y")
+    ai_panel.pack_propagate(False)
+
+    tk.Frame(body,bg=BORDER,width=1).pack(side="right",fill="y")
+
+    left=tk.Frame(body,bg=BG)
+    left.pack(side="left",fill="both",expand=True)
+
     # ---------- 编辑器 ----------
-    editor_wrap=tk.Frame(root,bg=BG)
+    editor_wrap=tk.Frame(left,bg=BG)
     editor_wrap.pack(fill="both",expand=True)
 
     gutter=tk.Canvas(editor_wrap,width=54,bg=GUTTER_BG,highlightthickness=0,bd=0)
@@ -851,8 +926,8 @@ def build_gui(initial_path=None):
             i=nxt
 
     # ---------- 底部输出 / 变量 ----------
-    tk.Frame(root,bg=BORDER,height=1).pack(fill="x")
-    bottom=tk.Frame(root,bg=BG,height=230)
+    tk.Frame(left,bg=BORDER,height=1).pack(fill="x")
+    bottom=tk.Frame(left,bg=BG,height=230)
     bottom.pack(fill="x")
     bottom.pack_propagate(False)
 
@@ -894,6 +969,250 @@ def build_gui(initial_path=None):
         except Exception: pass
         if msg is not None:
             st_msg.configure(text=msg)
+
+    # ---------- 小智 AI 面板 ----------
+    ai_cfg=ai_load_config()
+    ai_state={"busy":False,"history":[]}
+    ai_q=queue.Queue()
+
+    ai_head=tk.Frame(ai_panel,bg="#2a2d31")
+    ai_head.pack(fill="x")
+    tk.Label(ai_head,text="🤖 小智",bg="#2a2d31",fg="#9cdcfe",
+             font=("Microsoft YaHei UI",10,"bold"),padx=12,pady=8).pack(side="left")
+    tk.Label(ai_head,text="HX 语言向导",bg="#2a2d31",fg="#6a737d",
+             font=UI_FONT,padx=8).pack(side="left")
+    ai_set_btn=tk.Label(ai_head,text="⚙",bg="#2a2d31",fg="#858585",
+                        font=("Microsoft YaHei UI",12),cursor="hand2",padx=10)
+    ai_set_btn.pack(side="right")
+
+    ai_bottom=tk.Frame(ai_panel,bg="#2a2d31",height=160)
+    ai_bottom.pack(side="bottom",fill="x")
+    ai_bottom.pack_propagate(False)
+
+    chat_frame=tk.Frame(ai_panel,bg=PANEL)
+    chat_frame.pack(fill="both",expand=True)
+
+    chat=tk.Text(chat_frame,height=1,width=1,font=("Microsoft YaHei UI",9),wrap="word",
+                 bg=PANEL,fg="#d4d4d4",relief="flat",bd=0,padx=10,pady=8,
+                 highlightthickness=0,state="disabled",cursor="arrow",
+                 spacing1=2,spacing3=6)
+    chat_sb=tk.Scrollbar(chat_frame,orient="vertical",bg=PANEL,
+                         troughcolor=PANEL,relief="flat",bd=0,width=10,
+                         command=chat.yview)
+    chat_sb.pack(side="right",fill="y")
+    chat.pack(side="left",fill="both",expand=True)
+    chat.configure(yscrollcommand=chat_sb.set)
+
+    chat.tag_configure("user_label",foreground="#569cd6",font=("Microsoft YaHei UI",9,"bold"))
+    chat.tag_configure("user_text",foreground="#c8c8c8",lmargin1=6,lmargin2=6)
+    chat.tag_configure("ai_label",foreground="#dcdcaa",font=("Microsoft YaHei UI",9,"bold"))
+    chat.tag_configure("ai_text",foreground="#d4d4d4",lmargin1=6,lmargin2=6)
+    chat.tag_configure("sys",foreground="#6a9955",font=("Microsoft YaHei UI",8))
+    chat.tag_configure("insert_btn",foreground="#4ec9b0",font=("Microsoft YaHei UI",9,"underline"),lmargin1=6,lmargin2=6)
+    chat.tag_configure("code",foreground="#ce9178",background="#1b1b1b",
+                       font=("Consolas",9),lmargin1=10,lmargin2=10,spacing1=3,spacing3=3)
+    chat.tag_configure("err",foreground="#f14c4c")
+
+    ai_opts=tk.Frame(ai_bottom,bg="#2a2d31")
+    ai_opts.pack(fill="x",padx=10,pady=(6,0))
+    attach_var=tk.BooleanVar(value=True)
+    tk.Checkbutton(ai_opts,text="附带当前代码",variable=attach_var,
+                   bg="#2a2d31",fg="#858585",selectcolor="#3a3a3d",
+                   activebackground="#2a2d31",activeforeground="#d4d4d4",
+                   font=UI_FONT,bd=0,highlightthickness=0).pack(side="left")
+
+    input_row=tk.Frame(ai_bottom,bg="#2a2d31")
+    input_row.pack(fill="x",padx=10,pady=(4,10))
+
+    ai_input=tk.Text(input_row,height=3,width=1,font=("Microsoft YaHei UI",9),wrap="word",
+                     bg="#1e1e1e",fg="#d4d4d4",insertbackground="#aeafad",
+                     relief="flat",bd=0,padx=8,pady=6,highlightthickness=0)
+    ai_input.pack(side="left",fill="both",expand=True)
+
+    def ai_send_btn_state(busy):
+        if busy:
+            ai_send.configure(state="disabled",bg="#3a3a3d",text="…")
+        else:
+            ai_send.configure(state="normal",bg=ACCENT,text="发送")
+
+    ai_send=tk.Button(input_row,text="发送",command=lambda: ai_send_msg(),
+                      bg=ACCENT,fg="#ffffff",activebackground=ACCENT_HOVER,
+                      activeforeground="#ffffff",relief="flat",bd=0,padx=14,
+                      pady=8,cursor="hand2",font=UI_FONT,highlightthickness=0,
+                      width=6)
+    ai_send.pack(side="right",fill="y",padx=(8,0))
+
+    def chat_append(text,tag="ai_text"):
+        chat.configure(state="normal")
+        chat.insert("end",text,tag)
+        chat.see("end")
+        chat.configure(state="disabled")
+
+    def chat_clear():
+        chat.configure(state="normal"); chat.delete("1.0","end")
+        chat.configure(state="disabled")
+
+    def ai_welcome():
+        chat_clear()
+        if not ai_cfg.get("base_url"):
+            chat_append("你好，我是小智 🤖\n\n", "ai_label")
+            chat_append("我还没配置 API。点击右上角 ⚙ 填一下：\n"
+                        "  • Base URL  例如 https://api.deepseek.com/v1\n"
+                        "  • API Key   你的密钥\n"
+                        "  • Model     例如 deepseek-chat\n\n"
+                        "配好后我就能帮你在 HX 语言里闯荡啦。\n", "sys")
+        else:
+            chat_append("你好，我是小智 🤖\n", "ai_label")
+            chat_append("我是你的 HX 语言向导，可以帮你写代码、查错、讲解语法。\n"
+                        "直接输入问题，回车发送（Shift+Enter 换行）。\n", "ai_text")
+
+    def ai_config_dialog():
+        from tkinter import simpledialog
+        win=tk.Toplevel(root); win.title("小智 · API 配置")
+        win.geometry("480x300"); win.configure(bg=BG)
+        win.transient(root); win.grab_set()
+        pad={"padx":18,"pady":6}
+        tk.Label(win,text="OpenAI 兼容接口配置",bg=BG,fg="#9cdcfe",
+                 font=("Microsoft YaHei UI",11,"bold")).pack(anchor="w",padx=18,pady=(16,10))
+        rows=[("Base URL","base_url","https://api.deepseek.com/v1"),
+              ("API Key","api_key","sk-..."),
+              ("Model","model","deepseek-chat")]
+        ents={}
+        for label,key,ph in rows:
+            tk.Label(win,text=label,bg=BG,fg="#858585",font=UI_FONT).pack(anchor="w",padx=18)
+            e=tk.Entry(win,font=("Consolas",10),bg=PANEL,fg=FG,insertbackground=FG,
+                       relief="flat",bd=0,highlightthickness=1,
+                       highlightbackground=BORDER,highlightcolor=ACCENT)
+            e.insert(0,ai_cfg.get(key,""))
+            e.pack(fill="x",padx=18,pady=(2,8))
+            ents[key]=e
+        tip=tk.Label(win,text="支持 DeepSeek / Kimi / 通义 / 智谱 / Ollama 等 OpenAI 兼容服务",
+                     bg=BG,fg="#6a737d",font=("Microsoft YaHei UI",8))
+        tip.pack(anchor="w",padx=18)
+        def save():
+            for k,e in ents.items():
+                ai_cfg[k]=e.get().strip()
+            ok=ai_save_config(ai_cfg)
+            win.destroy()
+            if ok:
+                update_status("小智配置已保存")
+                ai_welcome()
+            else:
+                update_status("配置保存失败")
+        bf=tk.Frame(win,bg=BG); bf.pack(fill="x",padx=18,pady=14)
+        tk.Button(bf,text="保存",command=save,bg=ACCENT,fg="#ffffff",
+                  activebackground=ACCENT_HOVER,relief="flat",bd=0,
+                  padx=18,pady=6,cursor="hand2",font=UI_FONT).pack(side="right")
+        tk.Button(bf,text="取消",command=win.destroy,bg=TOOLBAR_BG,fg=FG,
+                  activebackground="#3a3a3d",relief="flat",bd=0,
+                  padx=14,pady=6,cursor="hand2",font=UI_FONT).pack(side="right",padx=(0,8))
+
+    ai_set_btn.bind("<Button-1>",lambda e: ai_config_dialog())
+
+    def ai_render_reply(content):
+        parts=content.split(FENCE)
+        i=0
+        for part in parts:
+            if i % 2 == 1:
+                body=part
+                nl=body.find("\n")
+                if nl >= 0:
+                    body=body[nl+1:]
+                chat_append(body.rstrip()+"\n", "code")
+                chat.configure(state="normal")
+                chat.insert("end","📋 双击此处插入代码\n\n",("insert_btn",))
+                chat.configure(state="disabled")
+            else:
+                if part:
+                    chat_append(part, "ai_text")
+            i+=1
+
+    def ai_send_msg():
+        if ai_state["busy"]:
+            return
+        text=ai_input.get("1.0","end-1c").strip()
+        if not text:
+            return
+        if not ai_cfg.get("base_url"):
+            ai_config_dialog()
+            return
+        ai_input.delete("1.0","end")
+        chat_append("你：\n", "user_label")
+        chat_append(text+"\n\n", "user_text")
+        msg=text
+        if attach_var.get():
+            code=ed.get("1.0","end-1c").strip()
+            if code:
+                msg=("当前编辑器代码：\n"+FENCE+"hxg\n"+code+"\n"+FENCE+"\n\n用户问题："+text)
+        ai_state["history"].append({"role":"user","content":msg})
+        ai_state["busy"]=True
+        ai_send_btn_state(True)
+        chat_append("小智正在思考…\n", "sys")
+        cfg=dict(ai_cfg)
+        hist=list(ai_state["history"])
+        def worker():
+            try:
+                reply=ai_chat(cfg, hist)
+                ai_q.put(("ok", reply))
+            except Exception as e:
+                ai_q.put(("err", str(e)))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def ai_poll():
+        try:
+            while True:
+                kind,val=ai_q.get_nowait()
+                chat.configure(state="normal")
+                # 删掉"正在思考"
+                idx=chat.search("小智正在思考…","1.0","end")
+                if idx:
+                    end=chat.index(idx+" lineend +1c")
+                    chat.delete(idx,end)
+                chat.configure(state="disabled")
+                if kind=="ok":
+                    ai_state["history"].append({"role":"assistant","content":val})
+                    chat_append("小智：\n","ai_label")
+                    ai_render_reply(val)
+                else:
+                    chat_append("出错了："+val+"\n\n","err")
+                ai_state["busy"]=False
+                ai_send_btn_state(False)
+        except queue.Empty:
+            pass
+        root.after(120, ai_poll)
+
+    def ai_key(ev):
+        if ev.state & 0x0001 and ev.keysym=="Return":
+            return None
+        if ev.keysym=="Return" and not (ev.state & 0x0001):
+            ai_send_msg()
+            return "break"
+    ai_input.bind("<Return>", ai_key)
+    ai_input.bind("<Shift-Return>", lambda e: None)
+
+    # 代码块点击插入
+    def chat_click(ev):
+        idx=chat.index("@%d,%d"%(ev.x,ev.y))
+        ranges=chat.tag_ranges("insert_btn")
+        for i in range(0,len(ranges),2):
+            s,en=ranges[i],ranges[i+1]
+            if chat.compare(s,"<=",idx) and chat.compare(idx,"<=",en):
+                code_ranges=chat.tag_ranges("code")
+                code_text=""
+                for j in range(0,len(code_ranges),2):
+                    cs,ce=code_ranges[j],code_ranges[j+1]
+                    if chat.compare(ce, "<=", s):
+                        code_text=chat.get(cs,ce)
+                if code_text:
+                    ed.insert("insert",code_text)
+                    hl(ed); sync_editor(); ed.focus_set()
+                    update_status("已插入代码到编辑器")
+                return
+    chat.bind("<Double-Button-1>",chat_click)
+    chat.bind("<Key>",lambda e:"break")
+
+    ai_welcome()
+    ai_poll()
 
     def set_state(text,color=STATUS_FG):
         st_run.configure(text=text,fg=color)
