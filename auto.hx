@@ -1,0 +1,15 @@
+s = 10;
+t = "hi";
+b = true;
+arr = [1,2,3];
+d = {name:"hx"};
+print(s, t, b, arr, d, dar(s));
+
+fn f() { x = 99; return x; }
+print("局部:", f());
+
+y = 1;
+y = y + 1;
+z = 0;
+z += 5;
+print(y, z);

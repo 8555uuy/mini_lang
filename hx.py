@@ -1,0 +1,903 @@
+# MiniLang v2 —— 解释器 + Tkinter 编码器
+# 语法：let x = 1;  fn f(a,b){...}  if/else  while  return
+#       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
+import sys, re
+
+KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
+            "fn","return","true","false","null","and","or","not","try","catch"}
+OPS = ["==","!=","<=",">=","+=","-=","*=","/=","%=","+","-","*","/","%","<",">","=",
+       "(",")","{","}","[","]",",",";",":","."]
+
+class MiniError(Exception):
+    pass
+
+class Tok:
+    __slots__ = ("k","v","line","col")
+    def __init__(self,k,v,line,col):
+        self.k=k; self.v=v; self.line=line; self.col=col
+
+
+def tokenize(src):
+    toks=[]; i=0; n=len(src); line=1; col=1
+    while i<n:
+        c=src[i]
+        if c in " \t\r\n":
+            if c=="\n": line+=1; col=1
+            else: col+=1
+            i+=1; continue
+        if c=="#":
+            while i<n and src[i]!="\n": i+=1
+            continue
+        l0,c0=line,col
+        if c.isdigit():
+            j=i
+            while j<n and (src[j].isdigit() or src[j]=="."): j+=1
+            toks.append(Tok("num",float(src[i:j]),l0,c0)); col+=j-i; i=j; continue
+        if c.isalpha() or c=="_":
+            j=i
+            while j<n and (src[j].isalnum() or src[j]=="_"): j+=1
+            w=src[i:j]; col+=j-i; i=j
+            toks.append(Tok(w,w,l0,c0) if w in KEYWORDS else Tok("id",w,l0,c0)); continue
+        if c in "\"'":
+            q=c; i+=1; col+=1; buf=[]; depth=0
+            while i<n:
+                ch=src[i]
+                if ch=="\\" and i+1<n and depth==0:
+                    i+=1; e=src[i]; i+=1; col+=2
+                    buf.append({"n":"\n","t":"\t"}.get(e,e)); continue
+                if depth==0 and ch==q: break
+                if src.startswith("${",i):
+                    depth+=1; buf.append("${"); i+=2; col+=2; continue
+                if ch=="}" and depth>0:
+                    depth-=1; buf.append("}"); i+=1; col+=1; continue
+                if ch=="\n": line+=1; col=1
+                else: col+=1
+                buf.append(ch); i+=1
+            if i>=n: raise SyntaxError("第 %d 行第 %d 列：字符串未闭合" % (l0,c0))
+            i+=1; col+=1
+            toks.append(Tok("str","".join(buf),l0,c0)); continue
+        for op in OPS:
+            if src.startswith(op,i):
+                toks.append(Tok(op,op,l0,c0)); i+=len(op); col+=len(op); break
+        else:
+            raise SyntaxError("第 %d 行第 %d 列：未知字符 %r" % (l0,c0,c))
+    toks.append(Tok("eof","eof",line,col))
+    return toks
+
+
+class Parser:
+    def __init__(self,toks):
+        self.t=toks; self.p=0
+
+    def peek(self,k=0):
+        return self.t[min(self.p+k,len(self.t)-1)]
+
+    def at(self,*ks):
+        return self.peek().k in ks
+
+    def take(self,k=None):
+        t=self.peek()
+        if k is not None and t.k!=k:
+            raise SyntaxError("第 %d 行第 %d 列：期望 %r，得到 %r" % (t.line,t.col,k,t.k))
+        self.p+=1; return t
+
+    def eat(self,k):
+        if self.at(k):
+            self.p+=1; return True
+        return False
+
+    def end(self):
+        self.eat(";")
+
+    def program(self):
+        body=[]
+        while not self.at("eof"): body.append(self.stmt())
+        return ("block",body,1)
+
+    def block(self):
+        t=self.take("{")
+        body=[]
+        while not self.at("}"):
+            if self.at("eof"): raise SyntaxError("第 %d 行：缺少 '}'" % t.line)
+            body.append(self.stmt())
+        self.take("}")
+        return ("block",body,t.line)
+
+    def stmt(self):
+        t=self.peek(); line=t.line
+        if t.k=="let" or (t.k=="dar" and self.peek(1).k!="("):
+            raise SyntaxError("第 %d 行：%s 声明已废弃，请直接写 x = 1;（自动判断类型）" % (line,t.k))
+        if t.k=="id" and t.v=="print" and self.peek(1).k not in ("(","["):
+            self.take()
+            e=self.expr(); self.end()
+            return ("call",("id","print",line),[e],line)
+        if self.eat("fn"):
+            name=self.take("id").v; self.take("("); ps=[]
+            while not self.at(")"):
+                ps.append(self.take("id").v)
+                if not self.eat(","): break
+            self.take(")")
+            return ("fn",name,ps,self.block(),line)
+        if self.eat("return"):
+            e=None if self.at("}",";","eof") else self.expr()
+            self.end()
+            return ("return",e,line)
+        if self.eat("if"):
+            self.take("("); c=self.expr(); self.take(")")
+            then=self.stmt()
+            els=self.stmt() if self.eat("else") else None
+            return ("if",c,then,els,line)
+        if self.eat("elif"):
+            self.take("("); c=self.expr(); self.take(")")
+            then=self.stmt()
+            els=self.stmt() if self.eat("else") else None
+            return ("if",c,then,els,line)
+        if self.eat("try"):
+            body=self.stmt()
+            self.take("catch"); self.take("("); nm=self.take("id").v; self.take(")")
+            handler=self.stmt()
+            return ("try",body,nm,handler,line)
+        if self.eat("while"):
+            self.take("("); c=self.expr(); self.take(")")
+            return ("while",c,self.stmt(),line)
+        if self.eat("for"):
+            self.take("(")
+            if self.at("id") and self.peek(1).k=="in":
+                name=self.take("id").v; self.take("in")
+                seq=self.expr(); self.take(")")
+                return ("forin",name,seq,self.stmt(),line)
+            init=None if self.at(";") else self.expr()
+            self.take(";")
+            cond=None if self.at(";") else self.expr()
+            self.take(";")
+            step=None if self.at(")") else self.expr()
+            self.take(")")
+            return ("forc",init,cond,step,self.stmt(),line)
+        if self.eat("break"):
+            self.end(); return ("break",line)
+        if self.eat("continue"):
+            self.end(); return ("continue",line)
+        if self.eat("del"):
+            tgt=self.postfix(); self.end()
+            return ("del",tgt,line)
+        if self.at("{"): return self.block()
+        e=self.expr(); self.end()
+        return ("expr",e,line)
+
+    def expr(self): return self.assign()
+
+    def assign(self):
+        node=self.or_()
+        t=self.peek()
+        if t.k=="=":
+            self.take()
+            return ("set",node,self.assign(),node[-1])
+        if t.k in ("+=","-=","*=","/=","%="):
+            op=self.take().k[:-1]
+            return ("set",node,("bin",op,node,self.assign(),node[-1]),node[-1])
+        return node
+
+    def or_(self):
+        node=self.and_()
+        while self.eat("or"):
+            node=("bin","or",node,self.and_(),node[-1])
+        return node
+
+    def and_(self):
+        node=self.not_()
+        while self.eat("and"):
+            node=("bin","and",node,self.not_(),node[-1])
+        return node
+
+    def not_(self):
+        if self.at("not"):
+            line=self.take().line
+            return ("un","not",self.not_(),line)
+        return self.cmp()
+
+    def cmp(self):
+        node=self.add()
+        while self.at("==","!=","<","<=",">",">="):
+            op=self.take().k
+            node=("bin",op,node,self.add(),node[-1])
+        return node
+
+    def add(self):
+        node=self.mul()
+        while self.at("+","-"):
+            op=self.take().k
+            node=("bin",op,node,self.mul(),node[-1])
+        return node
+
+    def mul(self):
+        node=self.unary()
+        while self.at("*","/","%"):
+            op=self.take().k
+            node=("bin",op,node,self.unary(),node[-1])
+        return node
+
+    def unary(self):
+        if self.at("-"):
+            line=self.take().line
+            return ("un","-",self.unary(),line)
+        return self.postfix()
+
+    def postfix(self):
+        node=self.atom()
+        while True:
+            if self.eat("("):
+                args=[]
+                while not self.at(")"):
+                    args.append(self.expr())
+                    if not self.eat(","): break
+                self.take(")")
+                node=("call",node,args,node[-1])
+            elif self.eat("["):
+                idx=self.expr(); self.take("]")
+                node=("idx",node,idx,node[-1])
+            elif self.eat("."):
+                name=self.take("id").v
+                node=("attr",node,name,node[-1])
+            else:
+                return node
+
+    def atom(self):
+        t=self.peek()
+        if t.k=="let":
+            raise SyntaxError("第 %d 行：let 声明已废弃，请直接写 x = 1;（自动判断类型）" % t.line)
+        if t.k=="num": self.take(); return ("num",t.v,t.line)
+        if t.k=="str":
+            self.take()
+            if "${" not in t.v: return ("str",t.v,t.line)
+            parts=[]; s=t.v; i=0
+            while True:
+                j=s.find("${",i)
+                if j<0: parts.append(("str",s[i:],t.line)); break
+                if j>i: parts.append(("str",s[i:j],t.line))
+                k2=s.find("}",j)
+                if k2<0: raise SyntaxError("第 %d 行：插值未闭合" % t.line)
+                parts.append(Parser(tokenize(s[j+2:k2])).expr())
+                i=k2+1
+            return ("cat",parts,t.line)
+        if t.k=="true": self.take(); return ("bool",True,t.line)
+        if t.k=="false": self.take(); return ("bool",False,t.line)
+        if t.k=="null": self.take(); return ("null",None,t.line)
+        if t.k=="dar" and self.peek(1).k!="(":
+            raise SyntaxError("第 %d 行：dar 声明已废弃，请直接写 x = 1;（自动判断类型）" % t.line)
+        if t.k=="id" or t.k=="dar":
+            self.take(); return ("id",t.v,t.line)
+        if t.k=="(":
+            self.take(); e=self.expr(); self.take(")"); return e
+        if t.k=="[":
+            self.take(); items=[]
+            while not self.at("]"):
+                items.append(self.expr())
+                if not self.eat(","): break
+            self.take("]")
+            return ("list",items,t.line)
+        if t.k=="{":
+            self.take(); pairs=[]
+            while not self.at("}"):
+                kt=self.take()
+                if kt.k not in ("str","id","num"):
+                    raise SyntaxError("第 %d 行：字典键必须是字符串或标识符" % kt.line)
+                self.take(":")
+                pairs.append((kt.v,self.expr()))
+                if not self.eat(","): break
+            self.take("}")
+            return ("dict",pairs,t.line)
+        raise SyntaxError("第 %d 行第 %d 列：意外的 %r" % (t.line,t.col,t.k))
+
+
+class Env:
+    def __init__(self,parent=None):
+        self.vars={}; self.parent=parent
+
+    def get(self,k):
+        e=self
+        while e:
+            if k in e.vars: return e.vars[k]
+            e=e.parent
+        raise NameError("未定义的变量 %s" % k)
+
+    def set(self,k,v):
+        e=self
+        while e:
+            if k in e.vars:
+                e.vars[k]=v; return
+            e=e.parent
+        raise NameError("未定义的变量 %s" % k)
+
+    def define(self,k,v):
+        self.vars[k]=v
+
+
+class Fn:
+    def __init__(self,params,body,env,name):
+        self.params=params; self.body=body; self.env=env; self.name=name
+
+
+class Native:
+    def __init__(self,fn): self.fn=fn
+
+
+class Return(Exception):
+    def __init__(self,value): self.value=value
+
+class BreakSig(Exception): pass
+class ContinueSig(Exception): pass
+
+
+def truth(v):
+    if v is None or v is False: return False
+    if isinstance(v,bool): return v
+    if isinstance(v,(int,float)): return v!=0
+    if isinstance(v,(str,list,dict)): return len(v)>0
+    return True
+
+
+def typename(v):
+    if isinstance(v,bool): return "布尔"
+    if isinstance(v,(int,float)): return "数字"
+    if isinstance(v,str): return "字符串"
+    if isinstance(v,list): return "数组"
+    if isinstance(v,dict): return "字典"
+    if isinstance(v,(Fn,Native)): return "函数"
+    if v is None: return "空"
+    return "未知"
+
+
+def fmt(v):
+    if v is True: return "true"
+    if v is False: return "false"
+    if v is None: return "null"
+    if isinstance(v,float) and v.is_integer(): return str(int(v))
+    if isinstance(v,list): return "["+", ".join(fmt(x) for x in v)+"]"
+    if isinstance(v,dict): return "{"+", ".join("%s: %s"%(k,fmt(x)) for k,x in v.items())+"}"
+    if isinstance(v,(Fn,Native)): return "<fn>"
+    return str(v)
+
+
+def to_num(v):
+    if isinstance(v,(int,float)): return float(v)
+    try: return float(v)
+    except Exception: raise MiniError("不能转成数字：%s" % fmt(v))
+
+
+class Interp:
+    def __init__(self):
+        self.globals=Env(); self.env=self.globals
+        self.outbuf=[]; self.steps=0; self.maxsteps=300000; self.trace=[]; self.ask_fn=None
+        g=self.globals
+        g.define("dar",Native(lambda a: typename(a[0])))
+        g.define("help",Native(lambda a: self.out(cheatsheet_text()+"\n")))
+        g.define("has",Native(lambda a: (a[1] in a[0]) if isinstance(a[0],(dict,list,str)) else False))
+        g.define("set",Native(lambda a: (a[0].__setitem__(a[1],a[2]),a[0])[1]))
+        g.define("items",Native(lambda a: [[k,v] for k,v in a[0].items()]))
+        g.define("upper",Native(lambda a: fmt(a[0]).upper()))
+        g.define("lower",Native(lambda a: fmt(a[0]).lower()))
+        g.define("trim",Native(lambda a: fmt(a[0]).strip()))
+        g.define("split",Native(lambda a: fmt(a[0]).split(fmt(a[1])) if len(a)>1 else fmt(a[0]).split()))
+        g.define("join",Native(lambda a: fmt(a[0]).join(fmt(x) for x in a[1])))
+        g.define("min",Native(lambda a: min(a[0]) if len(a)==1 and isinstance(a[0],list) else min(a)))
+        g.define("max",Native(lambda a: max(a[0]) if len(a)==1 and isinstance(a[0],list) else max(a)))
+        g.define("abs",Native(lambda a: abs(a[0])))
+        g.define("input",Native(lambda a: (self.out(fmt(a[0])) if a else None, self.ask())[1]))
+        g.define("print",Native(lambda a: self.out(" ".join(fmt(x) for x in a)+"\n")))
+        g.define("len",Native(lambda a: len(a[0])))
+        g.define("push",Native(lambda a: (a[0].append(a[1]),a[0])[1]))
+        g.define("keys",Native(lambda a: list(a[0].keys())))
+        g.define("str",Native(lambda a: fmt(a[0])))
+        g.define("num",Native(lambda a: to_num(a[0])))
+        g.define("range",Native(lambda a: [float(x) for x in range(int(a[0]))]))
+
+    def ask(self):
+        if self.ask_fn: return self.ask_fn()
+        try: return input()
+        except Exception: return ""
+
+    def text(self): return "".join(self.outbuf)
+    def out(self,s): self.outbuf.append(s)
+
+    def mark(self,line):
+        if len(self.trace)<3000:
+            self.trace.append((line,{k:fmt(v) for k,v in self.globals.vars.items()},len(self.outbuf)))
+
+    def run(self,prog):
+        try:
+            self.ex(prog)
+        except Return:
+            pass
+
+    def ex(self,n):
+        try:
+            self._ex(n)
+        except (Return,MiniError,BreakSig,ContinueSig):
+            raise
+        except ZeroDivisionError:
+            raise MiniError("第 %d 行：除数为 0" % n[-1])
+        except NameError as e:
+            raise MiniError("第 %d 行：%s" % (n[-1],e))
+        except Exception as e:
+            raise MiniError("第 %d 行：%s" % (n[-1],e))
+
+    def _ex(self,n):
+        self.steps+=1
+        if self.steps>self.maxsteps:
+            raise MiniError("执行步数超限（疑似死循环）")
+        self.mark(n[-1])
+        k=n[0]
+        if k=="block":
+            for s in n[1]: self.ex(s)
+        elif k=="fn":
+            self.env.define(n[1],Fn(n[2],n[3],self.env,n[1]))
+        elif k=="return":
+            raise Return(self.ev(n[1]) if n[1] is not None else None)
+        elif k=="expr":
+            self.ev(n[1])
+        elif k=="call":
+            self.ev(n)
+        elif k=="try":
+            _,body,nm,handler,ln=n
+            try:
+                self.ex(body)
+            except MiniError as e:
+                ne=Env(self.env); ne.define(nm,str(e))
+                old=self.env; self.env=ne
+                try: self.ex(handler)
+                finally: self.env=old
+        elif k=="if":
+            if truth(self.ev(n[1])): self.ex(n[2])
+            elif n[3] is not None: self.ex(n[3])
+        elif k=="while":
+            while truth(self.ev(n[1])):
+                try: self.ex(n[2])
+                except BreakSig: break
+                except ContinueSig: continue
+        elif k=="forin":
+            seq=self.ev(n[2])
+            if isinstance(seq,dict): seq=list(seq.keys())
+            if not isinstance(seq,(list,str,dict)):
+                raise MiniError("第 %d 行：for x in ... 只能遍历数组/字符串/字典" % n[-1])
+            for item in list(seq):
+                self.env.define(n[1],item)
+                try: self.ex(n[3])
+                except BreakSig: break
+                except ContinueSig: continue
+        elif k=="forc":
+            _,init,cond,step,body,ln=n
+            if init is not None: self.ev(init)
+            while cond is None or truth(self.ev(cond)):
+                try: self.ex(body)
+                except BreakSig: break
+                except ContinueSig: pass
+                if step is not None: self.ev(step)
+        elif k=="break":
+            raise BreakSig()
+        elif k=="continue":
+            raise ContinueSig()
+        elif k=="del":
+            self.deleting(n[1])
+        else:
+            raise MiniError("无法执行 %s" % k)
+
+    def ev(self,n):
+        k=n[0]
+        if k in ("num","str","bool","null"): return n[1]
+        if k=="cat": return "".join(fmt(self.ev(p)) for p in n[1])
+        if k=="id": return self.env.get(n[1])
+        if k=="list": return [self.ev(x) for x in n[1]]
+        if k=="dict": return dict((kk,self.ev(v)) for kk,v in n[1])
+        if k=="un":
+            v=self.ev(n[2])
+            return (-v) if n[1]=="-" else (not truth(v))
+        if k=="bin":
+            op=n[1]
+            if op=="and":
+                l=self.ev(n[2])
+                return self.ev(n[3]) if truth(l) else l
+            if op=="or":
+                l=self.ev(n[2])
+                return l if truth(l) else self.ev(n[3])
+            l=self.ev(n[2]); r=self.ev(n[3])
+            if op=="==": return l==r
+            if op=="!=": return l!=r
+            if op=="+":
+                if isinstance(l,str) or isinstance(r,str): return fmt(l)+fmt(r)
+                return l+r
+            if op=="-": return l-r
+            if op=="*": return l*r
+            if op=="/":
+                if r==0: raise ZeroDivisionError()
+                return l/r
+            if op=="%":
+                if r==0: raise ZeroDivisionError()
+                return l%r
+            if op=="<": return l<r
+            if op==">": return l>r
+            if op=="<=": return l<=r
+            if op==">=": return l>=r
+            raise MiniError("未知运算符 %s" % op)
+        if k=="set":
+            v=self.ev(n[2]); self.assign(n[1],v); return v
+        if k=="call":
+            f=self.ev(n[1]); args=[self.ev(a) for a in n[2]]
+            return self.call(f,args,n[-1])
+        if k=="idx":
+            return self.index(self.ev(n[1]),self.ev(n[2]),n[-1])
+        if k=="attr":
+            c=self.ev(n[1])
+            if isinstance(c,dict) and n[2] in c: return c[n[2]]
+            raise MiniError("第 %d 行：没有属性 %s" % (n[-1],n[2]))
+        raise MiniError("无法求值 %s" % k)
+
+    def deleting(self,node):
+        k=node[0]
+        if k=="idx":
+            c=self.ev(node[1]); i=self.ev(node[2])
+            if isinstance(c,dict):
+                if i in c: del c[i]; return
+                raise MiniError("第 %d 行：字典没有键 %s" % (node[-1],fmt(i)))
+            if isinstance(c,list):
+                kk=int(i)
+                if 0<=kk<len(c): del c[kk]; return
+                raise MiniError("第 %d 行：下标越界" % node[-1])
+            raise MiniError("第 %d 行：不能删除 %s 的元素" % (node[-1],fmt(c)))
+        if k=="attr":
+            c=self.ev(node[1])
+            if isinstance(c,dict) and node[2] in c:
+                del c[node[2]]; return
+            raise MiniError("第 %d 行：字典没有键 %s" % (node[-1],node[2]))
+        raise MiniError("第 %d 行：del 只支持 d[k] 或 d.k" % node[-1])
+
+    def index(self,c,i,line):
+        if isinstance(c,(list,str)):
+            k=int(i)
+            if k<0 or k>=len(c): raise MiniError("第 %d 行：下标越界 %d" % (line,k))
+            return c[k]
+        if isinstance(c,dict):
+            if i in c: return c[i]
+            raise MiniError("第 %d 行：字典没有键 %s" % (line,fmt(i)))
+        raise MiniError("第 %d 行：不能下标访问 %s" % (line,fmt(c)))
+
+    def assign(self,node,v):
+        k=node[0]
+        if k=="id":
+            try: self.env.set(node[1],v)
+            except NameError: self.env.define(node[1],v)
+            return
+        if k=="idx":
+            c=self.ev(node[1]); i=self.ev(node[2])
+            if isinstance(c,list):
+                kk=int(i)
+                if kk<0 or kk>=len(c): raise MiniError("第 %d 行：下标越界 %d" % (node[-1],kk))
+                c[kk]=v; return
+            if isinstance(c,dict): c[i]=v; return
+            raise MiniError("第 %d 行：不能赋值下标" % node[-1])
+        if k=="attr":
+            c=self.ev(node[1])
+            if isinstance(c,dict): c[node[2]]=v; return
+            raise MiniError("第 %d 行：不能设置属性" % node[-1])
+        raise MiniError("第 %d 行：非法赋值目标" % node[-1])
+
+    def call(self,f,args,line):
+        if isinstance(f,Native):
+            try: return f.fn(args)
+            except MiniError: raise
+            except Exception as e: raise MiniError("第 %d 行：%s" % (line,e))
+        if isinstance(f,Fn):
+            env=Env(f.env)
+            for i,p in enumerate(f.params):
+                env.define(p,args[i] if i<len(args) else None)
+            saved=self.env; self.env=env
+            try:
+                self.ex(f.body); return None
+            except Return as r:
+                return r.value
+            finally:
+                self.env=saved
+        raise MiniError("第 %d 行：%s 不是函数" % (line,fmt(f)))
+
+
+CHEATSHEET = {
+"变量": [
+  "x = 10;              直接赋值，自动判断类型（无需声明）",
+  'x = "hi";            同样自动识别 字符串/数组/字典/布尔 等',
+  "dar(x)               查询类型：数字/字符串/布尔/数组/字典/函数/空",
+  "true / false / null  布尔与空值字面量",
+  "注意：let / dar 声明写法已移除，直接写 x = 1;",
+],
+"输出与输入": [
+  'print("hi", 1);     括号式输出，多参数空格分隔',
+  'print "hi";          无括号也行',
+  'input("提示")        读一行输入（命令行）',
+  'help()               打印语法速查',
+],
+"函数": [
+  "fn add(a, b) { return a + b; }",
+  "递归：fn fib(n){ if(n<2){return n;} return fib(n-1)+fib(n-2); }",
+],
+"控制流": [
+  "if (c) { ... } else { ... }",
+  "elif (c) { ... }          多分支，接在 if/elif 之后",
+  "while (c) { ... }",
+  "for (x in arr) { ... }     遍历 数组/字符串/字典(键)",
+  "for (i = 0; i < n; i += 1) { ... }   C 式三段循环，三段均可省略",
+  "break;   continue;",
+  "try { ... } catch (e) { ... }   捕获错误，e 为错误信息",
+  "and / or / not",
+],
+"运算符": [
+  "+ - * / %               算术",
+  "== != < <= > >=         比较",
+  "+= -= *= /= %=          复合赋值",
+  "x = 1                   赋值（分号可省，未声明则自动创建）",
+],
+"数组": [
+  "a = [1, 2, 3];",
+  "a[0]   a[0] = 9",
+  "len(a)  push(a, 4)  min(a)  max(a)  abs(-3)",
+  "range(5)  生成 [0, 1, 2, 3, 4]",
+],
+"字典": [
+  'd = {name: "mini", ver: 3};',
+  "d.name   d[\"name\"]   d.k = 1",
+  "keys(d)  items(d)  has(d, \"k\")  set(d, \"k\", 1)",
+  "del d.k   del d[\"k\"]",
+],
+"字符串": [
+  '"hi" + 1                拼接，自动转字符串',
+  'upper("ab")  lower("AB")  trim("  x  ")',
+  'split("a-b", "-")  join("-", ["a","b"])',
+  '"hi ${x}!"             字符串插值，${表达式} 求值后拼接',
+  'str(3)   num("4.5")     转字符串 / 转数字',
+],
+"注释": ["# 这一行是注释"],
+}
+
+CHEAT_ORDER = ["变量","输出与输入","函数","控制流","运算符","数组","字典","字符串","注释"]
+
+def cheatsheet_text():
+    lines = []
+    for sec in CHEAT_ORDER:
+        lines.append("【%s】" % sec)
+        for item in CHEATSHEET[sec]:
+            lines.append("  " + item)
+        lines.append("")
+    return "\n".join(lines)
+
+SAMPLE = '''# HX 语言示例：print(...) 直接输出
+fn fib(n) {
+  if (n < 2) { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+fn add(a, b) { return a + b; }
+
+print("fib(10) =", fib(10));
+print("add(3,4) =", add(3, 4));
+
+n = 42;
+print("dar(n) =", dar(n), "| n =", n);
+s = "hi";
+print("dar(s) =", dar(s));
+arr2 = [1, 2];
+print("dar(arr2) =", dar(arr2));
+print "无括号 print 也行";
+
+arr = [1, 2, 3];
+push(arr, 4);
+print("arr =", arr, "len =", len(arr));
+
+d = {name: "mini", ver: 2};
+print("dict =", d, "name =", d.name, "ver =", d["ver"]);
+
+i = 0;
+sum = 0;
+while (i < len(arr)) { sum = sum + arr[i]; i = i + 1; }
+print("sum =", sum);
+
+for (x in arr) { print("项:", x); }
+for (j = 0; j < 3; j += 1) { print("j =", j); }
+
+s = "hi";
+print(s + "!" + 1);
+if (sum > 5 and true) { print("ok"); } else { print("bad"); }
+'''
+
+TOKRE = re.compile(r'#[^\n]*|"[^"\n]*"|\'[^\'\n]*\'|\b\d+(?:\.\d+)?\b|\b(?:dar|if|elif|else|while|for|in|fn|return|true|false|null|and|or|not|try|catch|break|continue|del)\b|\b(?:print|len|push|keys|str|num|range|input|help)\b')
+KW = {"dar","if","else","elif","while","for","in","break","continue","del","fn","return","true","false","null","and","or","not","try","catch"}
+
+
+def idx_of(txt,off):
+    line=txt.count("\n",0,off)+1
+    col=off-(txt.rfind("\n",0,off)+1)
+    return "%d.%d" % (line,col)
+
+
+def hl(w):
+    txt=w.get("1.0","end-1c")
+    for t in ("kw","str","num","cmt","bi"):
+        w.tag_remove(t,"1.0","end")
+    for m in TOKRE.finditer(txt):
+        s=m.group()
+        if s[0]=="#": t="cmt"
+        elif s[0] in "\"'": t="str"
+        elif s[0].isdigit(): t="num"
+        elif s in KW: t="kw"
+        else: t="bi"
+        w.tag_add(t,idx_of(txt,m.start()),idx_of(txt,m.end()))
+
+
+BG="#1e1e1e"; PANEL="#252526"; FG="#d4d4d4"; BTN_BG="#333333"
+
+
+def build_gui():
+    import tkinter as tk
+    from tkinter import filedialog, simpledialog
+    root=tk.Tk()
+    root.title("HX 语言编码器")
+    root.geometry("1120x820")
+    root.configure(bg=BG)
+    bar=tk.Frame(root,bg=BG); bar.pack(fill="x",padx=8,pady=6)
+    ed=tk.Text(root,font=("Consolas",12),undo=True,wrap="none",
+               bg=BG,fg=FG,insertbackground=FG,selectbackground="#264f78",
+               selectforeground="#ffffff",relief="flat",padx=8,pady=6,
+               highlightthickness=0)
+    ed.pack(fill="both",expand=True,padx=8)
+    ed.tag_configure("kw",foreground="#569cd6")
+    ed.tag_configure("str",foreground="#ce9178")
+    ed.tag_configure("num",foreground="#b5cea8")
+    ed.tag_configure("cmt",foreground="#6a9955")
+    ed.tag_configure("bi",foreground="#dcdcaa")
+    ed.tag_configure("cur",background="#2a3f5f")
+    ed.tag_configure("err",background="#5a1d1d",foreground="#ff9c9c")
+    bottom=tk.Frame(root,bg=BG); bottom.pack(fill="both",expand=True,padx=8,pady=(0,8))
+    out=tk.Text(bottom,font=("Consolas",11),state="disabled",
+                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",padx=6,pady=4)
+    out.pack(side="left",fill="both",expand=True)
+    vf=tk.Frame(bottom,bg=BG); vf.pack(side="left",fill="y",padx=(8,0))
+    tk.Label(vf,text="变量（单步）",bg=BG,fg="#9cdcfe").pack(anchor="w")
+    var=tk.Text(vf,font=("Consolas",11),width=34,state="disabled",
+                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",padx=6,pady=4)
+    var.pack(fill="both",expand=True)
+
+    st={"trace":[],"i":-1,"it":None}
+    cur={"path":None}
+
+    def show_out(s):
+        out.configure(state="normal"); out.delete("1.0","end")
+        out.insert("1.0",s); out.see("end"); out.configure(state="disabled")
+
+    def show_vars(d):
+        var.configure(state="normal"); var.delete("1.0","end")
+        var.insert("1.0","\n".join("%s = %s"%(k,v) for k,v in d.items()))
+        var.configure(state="disabled")
+
+    def mark_error(msg):
+        ed.tag_remove("err","1.0","end")
+        m=re.search(r"第 (\d+) 行", msg)
+        if m:
+            ln=int(m.group(1))
+            ed.tag_add("err","%d.0"%ln,"%d.end"%ln)
+            ed.see("%d.0"%ln)
+        return msg
+
+    def highlight_line(line):
+        ed.tag_remove("cur","1.0","end")
+        if line:
+            ed.tag_add("cur","%d.0"%line,"%d.end"%line)
+            ed.see("%d.0"%line)
+
+    def do_run():
+        src=ed.get("1.0","end")
+        it=Interp(); st["it"]=it; st["trace"]=[]; st["i"]=-1
+        it.ask_fn=lambda: (simpledialog.askstring("HX 输入","请输入：",parent=root) or "")
+        highlight_line(0)
+        ed.tag_remove("err","1.0","end")
+        try:
+            prog=Parser(tokenize(src)).program()
+        except SyntaxError as e:
+            show_out(mark_error(str(e))+"\n"); return
+        try:
+            it.run(prog)
+        except MiniError as e:
+            st["trace"]=it.trace
+            show_out(it.text()+mark_error(str(e))+"\n"); return
+        st["trace"]=it.trace
+        show_out(it.text())
+        show_vars(dict((k,fmt(v)) for k,v in it.globals.vars.items()))
+
+    def goto(i):
+        line,vars_,olen=st["trace"][i]
+        show_out("".join(st["it"].outbuf[:olen]))
+        show_vars(vars_)
+        highlight_line(line)
+
+    def do_step():
+        if not st["trace"]:
+            do_run(); return
+        i=st["i"]+1
+        if i>=len(st["trace"]): return
+        st["i"]=i; goto(i)
+
+    def do_prev():
+        if not st["trace"] or st["i"]<=0: return
+        st["i"]-=1; goto(st["i"])
+
+    def do_clear():
+        ed.delete("1.0","end"); show_out(""); show_vars({})
+
+    def do_sample():
+        ed.delete("1.0","end"); ed.insert("1.0",SAMPLE); hl(ed)
+
+    def do_open():
+        p=tk.filedialog.askopenfilename(filetypes=[("HX 源码","*.hx"),("所有文件","*.*")])
+        if not p: return
+        with open(p,encoding="utf-8") as f: s=f.read()
+        ed.delete("1.0","end"); ed.insert("1.0",s); hl(ed)
+        ed.tag_remove("err","1.0","end")
+        cur["path"]=p; root.title("HX 语言编码器 - "+p)
+
+    def do_save():
+        p=cur["path"]
+        if not p:
+            p=tk.filedialog.asksaveasfilename(defaultextension=".hx",
+                filetypes=[("HX 源码","*.hx")])
+            if not p: return
+        with open(p,"w",encoding="utf-8") as f: f.write(ed.get("1.0","end-1c"))
+        cur["path"]=p; root.title("HX 语言编码器 - "+p)
+
+    def btn(t,c):
+        b=tk.Button(bar,text=t,command=c,bg=BTN_BG,fg=FG,
+                    activebackground="#444444",activeforeground="#ffffff",
+                    relief="flat",padx=10,pady=4,cursor="hand2")
+        b.pack(side="left",padx=3); return b
+
+    btn("📂 打开",do_open)
+    btn("💾 保存",do_save)
+    btn("▶ 运行 (F5)",do_run)
+    btn("⏭ 单步 (F10)",do_step)
+    btn("⏮ 上一步",do_prev)
+    btn("载入示例",do_sample)
+    btn("清空",do_clear)
+
+    def do_cheat():
+        win=tk.Toplevel(root); win.title("HX 语法速查"); win.geometry("720x680")
+        win.configure(bg=BG)
+        txt=tk.Text(win,font=("Consolas",11),wrap="word",bg=BG,fg=FG,relief="flat",padx=8,pady=6)
+        txt.pack(fill="both",expand=True)
+        txt.insert("1.0",cheatsheet_text())
+        txt.tag_configure("sec",font=("Microsoft YaHei",11,"bold"),foreground="#569cd6")
+        txt.tag_configure("item",foreground="#d4d4d4")
+        for i,line in enumerate(cheatsheet_text().split("\n"),1):
+            if line.startswith("【"):
+                txt.tag_add("sec","%d.0"%i,"%d.end"%i)
+            elif line.strip():
+                txt.tag_add("item","%d.0"%i,"%d.end"%i)
+        txt.configure(state="disabled")
+
+    btn("📖 语法速查",do_cheat)
+
+    ed.bind("<KeyRelease>",lambda e: hl(ed))
+    root.bind("<F5>",lambda e: (do_run(),"break")[1])
+    root.bind("<F10>",lambda e: (do_step(),"break")[1])
+    ed.insert("1.0",SAMPLE)
+    hl(ed)
+    ed.focus_set()
+    root.mainloop()
+
+
+if __name__=="__main__":
+    if len(sys.argv)>1:
+        try: sys.stdout.reconfigure(encoding="utf-8")
+        except Exception: pass
+        with open(sys.argv[1],encoding="utf-8") as f: src=f.read()
+        it=Interp()
+        try:
+            it.run(Parser(tokenize(src)).program())
+        except (SyntaxError,MiniError) as e:
+            sys.stdout.write(it.text()+str(e)+"\n"); sys.exit(1)
+        sys.stdout.write(it.text())
+    else:
+        build_gui()
+
