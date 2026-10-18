@@ -1,6 +1,6 @@
 # MiniLang / HX 语言
 
-一个用 Python 实现的迷你脚本语言解释器，附带 Tkinter 图形编码器。
+一个用 Python 实现的迷你脚本语言解释器，附带 VS Code 风格的集成开发环境（HX Studio）。
 
 ## 特性
 
@@ -11,7 +11,8 @@
 - **字符串插值**：`"hi ${x}!"`
 - **丰富数据结构**：数组、字典、函数、闭包
 - **内置图形绘制**：`gwin` / `gline` / `grect` / `gcircle` / `gtext`，用代码画图
-- **图形编码器**：语法高亮、行号、错误红色波浪线、单步调试、变量观察
+- **HX Studio 编辑器**：VS Code 风格界面（菜单栏 / 活动栏 / 资源管理器 / 标签页 / 面包屑 / 状态栏）
+- **开发辅助**：语法高亮、行号、错误红色波浪线、单步调试、变量观察、问题面板
 
 ## 快速开始
 
@@ -19,10 +20,10 @@
 # 命令行运行
 python hx.py demo.hxg
 
-# 打开图形编码器
+# 打开 HX Studio
 python hx.py
 
-# 用编码器打开指定文件
+# 用 Studio 打开指定文件
 python hx.py --edit demo.hxg
 ```
 
@@ -104,6 +105,23 @@ powershell -ExecutionPolicy Bypass -File register_filetype.ps1
 撤销：`unregister_filetype.ps1`
 
 图标文件 `hx.ico` 由 `make_icon.py` 生成（需要 Pillow）。
+
+## HX Studio 界面
+
+界面布局仿照 VS Code：
+
+| 区域 | 说明 |
+|---|---|
+| 菜单栏 | 文件 / 编辑 / 运行 / 视图 / 帮助 |
+| 活动栏 | 资源管理器、搜索、小智、设置 |
+| 侧边栏 | 项目内 `.hxg` 文件列表，点击打开 |
+| 标签页 | 当前文件名 + 关闭按钮 |
+| 面包屑 | 显示文件所在路径 |
+| 底部面板 | 输出 / 变量 / 问题 三标签切换 |
+| 状态栏 | 分支、错误数、光标位置、编码、语言 |
+| 右侧 | 小智 AI 助手 |
+
+快捷键：`F5` 运行、`F10` 单步、`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+N` 新建、`Ctrl+B` 切换侧边栏。
 
 ## 图形绘制
 
