@@ -1,7 +1,7 @@
 # MiniLang v2 —— 解释器 + Tkinter 编码器
-# 语法：let x = 1;  fn f(a,b){...}  if/else  while  return
+# 语法：x = 1;  fn f(a,b){...}  if/elif/else  while  for  return
 #       print("hi", 1);  数组 [1,2]  字典 {a:1}  字符串 "x" 或 'x'  注释 #
-import sys, re
+import sys, re, os, math
 
 KEYWORDS = {"let","dar","if","else","elif","while","for","in","break","continue","del",
             "fn","return","true","false","null","and","or","not","try","catch"}
@@ -107,10 +107,8 @@ class Parser:
         t=self.peek(); line=t.line
         if t.k=="let" or (t.k=="dar" and self.peek(1).k!="("):
             raise SyntaxError("第 %d 行：%s 声明已废弃，请直接写 x = 1;（自动判断类型）" % (line,t.k))
-        if t.k=="id" and t.v=="print" and self.peek(1).k not in ("(","["):
-            self.take()
-            e=self.expr(); self.end()
-            return ("call",("id","print",line),[e],line)
+        if t.k=="id" and t.v=="print" and self.peek(1).k!="(":
+            raise SyntaxError("第 %d 行：print 必须加括号，写成 print(...)" % line)
         if self.eat("fn"):
             name=self.take("id").v; self.take("("); ps=[]
             while not self.at(")"):
@@ -608,8 +606,8 @@ CHEATSHEET = {
   "注意：let / dar 声明写法已移除，直接写 x = 1;",
 ],
 "输出与输入": [
-  'print("hi", 1);     括号式输出，多参数空格分隔',
-  'print "hi";          无括号也行',
+  'print("hi", 1);     输出，多参数用空格分隔',
+  'print();             无参数输出一个空行',
   'input("提示")        读一行输入（命令行）',
   'help()               打印语法速查',
 ],
@@ -682,7 +680,7 @@ s = "hi";
 print("dar(s) =", dar(s));
 arr2 = [1, 2];
 print("dar(arr2) =", dar(arr2));
-print "无括号 print 也行";
+print("括号 print 更清晰");
 
 arr = [1, 2, 3];
 push(arr, 4);
@@ -728,41 +726,180 @@ def hl(w):
         w.tag_add(t,idx_of(txt,m.start()),idx_of(txt,m.end()))
 
 
-BG="#1e1e1e"; PANEL="#252526"; FG="#d4d4d4"; BTN_BG="#333333"
+BG="#1e1e1e"; PANEL="#252526"; FG="#d4d4d4"
+TOOLBAR_BG="#2d2d30"; BORDER="#3e3e42"; ACCENT="#0e639c"; ACCENT_HOVER="#1177bb"
+GUTTER_BG="#1e1e1e"; GUTTER_FG="#858585"; STATUS_BG="#007acc"; STATUS_FG="#ffffff"
+ERR_RED="#f14c4c"
+
+LN_FONT=("Consolas",12)
+UI_FONT=("Microsoft YaHei UI",9)
 
 
-def build_gui():
+def build_gui(initial_path=None):
     import tkinter as tk
     from tkinter import filedialog, simpledialog
+
     root=tk.Tk()
     root.title("HX 语言编码器")
-    root.geometry("1120x820")
+    root.geometry("1200x860")
     root.configure(bg=BG)
-    bar=tk.Frame(root,bg=BG); bar.pack(fill="x",padx=8,pady=6)
-    ed=tk.Text(root,font=("Consolas",12),undo=True,wrap="none",
-               bg=BG,fg=FG,insertbackground=FG,selectbackground="#264f78",
-               selectforeground="#ffffff",relief="flat",padx=8,pady=6,
-               highlightthickness=0)
-    ed.pack(fill="both",expand=True,padx=8)
+    root.minsize(780,540)
+
+    hooks={"sync": lambda: None}
+    err={"line":0,"col":0}
+    st={"trace":[],"i":-1,"it":None}
+    cur={"path":None}
+
+    # ---------- 工具栏 ----------
+    bar=tk.Frame(root,bg=TOOLBAR_BG)
+    bar.pack(fill="x")
+    tk.Frame(root,bg=BORDER,height=1).pack(fill="x")
+
+    def mkbtn(text,cmd,accent=False):
+        bg=ACCENT if accent else TOOLBAR_BG
+        fg="#ffffff" if accent else FG
+        b=tk.Button(bar,text=text,command=cmd,bg=bg,fg=fg,
+                    activebackground=ACCENT_HOVER if accent else "#3a3a3d",
+                    activeforeground="#ffffff",relief="flat",bd=0,
+                    padx=12,pady=6,cursor="hand2",font=UI_FONT,
+                    highlightthickness=0,takefocus=0)
+        b.pack(side="left",padx=2,pady=6)
+        return b
+
+    # ---------- 编辑器 ----------
+    editor_wrap=tk.Frame(root,bg=BG)
+    editor_wrap.pack(fill="both",expand=True)
+
+    gutter=tk.Canvas(editor_wrap,width=54,bg=GUTTER_BG,highlightthickness=0,bd=0)
+    gutter.pack(side="left",fill="y")
+
+    ed=tk.Text(editor_wrap,font=LN_FONT,undo=True,wrap="none",
+               bg=BG,fg=FG,insertbackground="#aeafad",
+               selectbackground="#264f78",selectforeground="#ffffff",
+               relief="flat",bd=0,padx=10,pady=8,
+               highlightthickness=0,insertwidth=2)
+    ed.pack(side="left",fill="both",expand=True)
+
+    sb=tk.Scrollbar(editor_wrap,orient="vertical",
+                    bg=PANEL,activebackground="#4a4a4d",troughcolor=BG,
+                    relief="flat",bd=0,width=12)
+    sb.pack(side="right",fill="y")
+    sb.configure(command=lambda *a: (ed.yview(*a), hooks["sync"]()))
+
     ed.tag_configure("kw",foreground="#569cd6")
     ed.tag_configure("str",foreground="#ce9178")
     ed.tag_configure("num",foreground="#b5cea8")
     ed.tag_configure("cmt",foreground="#6a9955")
     ed.tag_configure("bi",foreground="#dcdcaa")
     ed.tag_configure("cur",background="#2a3f5f")
-    ed.tag_configure("err",background="#5a1d1d",foreground="#ff9c9c")
-    bottom=tk.Frame(root,bg=BG); bottom.pack(fill="both",expand=True,padx=8,pady=(0,8))
-    out=tk.Text(bottom,font=("Consolas",11),state="disabled",
-                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",padx=6,pady=4)
-    out.pack(side="left",fill="both",expand=True)
-    vf=tk.Frame(bottom,bg=BG); vf.pack(side="left",fill="y",padx=(8,0))
-    tk.Label(vf,text="变量（单步）",bg=BG,fg="#9cdcfe").pack(anchor="w")
-    var=tk.Text(vf,font=("Consolas",11),width=34,state="disabled",
-                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",padx=6,pady=4)
-    var.pack(fill="both",expand=True)
+    ed.tag_configure("err",background="#3a1d1d")
 
-    st={"trace":[],"i":-1,"it":None}
-    cur={"path":None}
+    wave_canvases=[]
+
+    def clear_waves():
+        for c in wave_canvases:
+            try: c.destroy()
+            except Exception: pass
+        wave_canvases.clear()
+
+    def forward_click(ev):
+        if err["line"]:
+            try:
+                ed.mark_set("insert","%d.%d"%(err["line"],max(err["col"],0)))
+                ed.see("insert"); ed.focus_set()
+            except Exception: pass
+
+    def draw_waves():
+        clear_waves()
+        if not err["line"]: return
+        line=err["line"]
+        start_idx="%d.%d"%(line,max(err["col"],0))
+        b1=ed.bbox(start_idx)
+        if not b1: b1=ed.bbox("%d.0"%line)
+        if not b1: return
+        b2=ed.bbox("%d.end"%line)
+        x1,y1,w1,h1=b1
+        x2=b2[0] if b2 else x1+max(w1*8,140)
+        if x2<=x1: x2=x1+max(w1,20)
+        ww=max(x2-x1,10)
+        c=tk.Canvas(ed,width=ww,height=6,bg=BG,highlightthickness=0,bd=0)
+        pts=[]; x=1
+        while x<=ww-1:
+            pts.extend([x,3+1.4*math.sin(x*1.5)]); x+=3
+        c.create_line(pts,fill=ERR_RED,width=1.6,smooth=True)
+        c.place(x=x1,y=y1+h1-5)
+        c.bind("<Button-1>",forward_click)
+        c.bind("<MouseWheel>",lambda e:(ed.event_generate("<MouseWheel>",delta=e.delta),None))
+        wave_canvases.append(c)
+
+    def draw_gutter():
+        gutter.delete("all")
+        i=ed.index("@0,0")
+        while True:
+            info=ed.dlineinfo(i)
+            if info is None: break
+            y=info[1]; ln=i.split(".")[0]; n=int(ln)
+            if n==err["line"]:
+                gutter.create_rectangle(0,y-1,54,y+info[3]+1,fill="#3a1d1d",outline="")
+                fg=ERR_RED
+            else:
+                fg=GUTTER_FG
+            gutter.create_text(46,y+info[3]//2,anchor="e",text=ln,fill=fg,
+                               font=(LN_FONT[0],LN_FONT[1]-1))
+            nxt=ed.index("%s+1line"%i)
+            if nxt==i: break
+            i=nxt
+
+    # ---------- 底部输出 / 变量 ----------
+    tk.Frame(root,bg=BORDER,height=1).pack(fill="x")
+    bottom=tk.Frame(root,bg=BG,height=230)
+    bottom.pack(fill="x")
+    bottom.pack_propagate(False)
+
+    head=tk.Frame(bottom,bg=BG)
+    head.pack(fill="x",padx=12,pady=(8,2))
+    tk.Label(head,text="输出",bg=BG,fg="#9cdcfe",font=UI_FONT).pack(side="left")
+    tk.Label(head,text="变量",bg=BG,fg="#9cdcfe",font=UI_FONT).pack(side="right",padx=(0,8))
+
+    panes=tk.Frame(bottom,bg=BG)
+    panes.pack(fill="both",expand=True,padx=12,pady=(0,10))
+
+    out=tk.Text(panes,font=("Consolas",11),state="disabled",wrap="word",
+                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",bd=0,
+                padx=10,pady=8,highlightthickness=0)
+    out.pack(side="left",fill="both",expand=True)
+
+    tk.Frame(panes,bg=BORDER,width=1).pack(side="left",fill="y",padx=10)
+
+    var=tk.Text(panes,font=("Consolas",11),width=30,state="disabled",wrap="none",
+                bg=PANEL,fg=FG,insertbackground=FG,relief="flat",bd=0,
+                padx=10,pady=8,highlightthickness=0)
+    var.pack(side="left",fill="both")
+
+    # ---------- 状态栏 ----------
+    tk.Frame(root,bg=BORDER,height=1).pack(fill="x")
+    status=tk.Frame(root,bg=STATUS_BG)
+    status.pack(fill="x")
+    st_pos=tk.Label(status,text="行 1, 列 1",bg=STATUS_BG,fg=STATUS_FG,font=UI_FONT,padx=10,pady=3)
+    st_pos.pack(side="left")
+    st_msg=tk.Label(status,text="就绪",bg=STATUS_BG,fg=STATUS_FG,font=UI_FONT,padx=10,pady=3,anchor="w")
+    st_msg.pack(side="left",fill="x",expand=True)
+    st_run=tk.Label(status,text="",bg=STATUS_BG,fg=STATUS_FG,font=UI_FONT,padx=10,pady=3)
+    st_run.pack(side="right")
+
+    def update_status(msg=None):
+        try:
+            ln,col=ed.index("insert").split(".")
+            st_pos.configure(text="行 %s, 列 %d"%(ln,int(col)+1))
+        except Exception: pass
+        if msg is not None:
+            st_msg.configure(text=msg)
+
+    def set_state(text,color=STATUS_FG):
+        st_run.configure(text=text,fg=color)
+
+    def sync_editor():
+        draw_gutter(); draw_waves(); update_status()
 
     def show_out(s):
         out.configure(state="normal"); out.delete("1.0","end")
@@ -775,37 +912,51 @@ def build_gui():
 
     def mark_error(msg):
         ed.tag_remove("err","1.0","end")
-        m=re.search(r"第 (\d+) 行", msg)
+        err["line"]=0; err["col"]=0
+        m=re.search(r"第 (\d+) 行(?:第 (\d+) 列)?", msg)
         if m:
-            ln=int(m.group(1))
+            ln=int(m.group(1)); col=int(m.group(2))-1 if m.group(2) else 0
+            if col<0: col=0
+            err["line"]=ln; err["col"]=col
             ed.tag_add("err","%d.0"%ln,"%d.end"%ln)
-            ed.see("%d.0"%ln)
+            try:
+                ed.see("%d.0"%ln); ed.mark_set("insert","%d.%d"%(ln,col))
+            except Exception: pass
+            sync_editor()
+        update_status(msg.strip())
         return msg
+
+    def clear_error():
+        ed.tag_remove("err","1.0","end")
+        err["line"]=0; err["col"]=0
+        sync_editor()
 
     def highlight_line(line):
         ed.tag_remove("cur","1.0","end")
         if line:
             ed.tag_add("cur","%d.0"%line,"%d.end"%line)
             ed.see("%d.0"%line)
+        sync_editor()
 
     def do_run():
         src=ed.get("1.0","end")
         it=Interp(); st["it"]=it; st["trace"]=[]; st["i"]=-1
         it.ask_fn=lambda: (simpledialog.askstring("HX 输入","请输入：",parent=root) or "")
-        highlight_line(0)
-        ed.tag_remove("err","1.0","end")
+        highlight_line(0); clear_error(); set_state("运行中…")
         try:
             prog=Parser(tokenize(src)).program()
         except SyntaxError as e:
-            show_out(mark_error(str(e))+"\n"); return
+            set_state("语法错误",ERR_RED); show_out(mark_error(str(e))+"\n"); return
         try:
             it.run(prog)
         except MiniError as e:
             st["trace"]=it.trace
+            set_state("运行错误",ERR_RED)
             show_out(it.text()+mark_error(str(e))+"\n"); return
         st["trace"]=it.trace
         show_out(it.text())
         show_vars(dict((k,fmt(v)) for k,v in it.globals.vars.items()))
+        set_state("完成"); update_status("运行完成")
 
     def goto(i):
         line,vars_,olen=st["trace"][i]
@@ -819,52 +970,47 @@ def build_gui():
         i=st["i"]+1
         if i>=len(st["trace"]): return
         st["i"]=i; goto(i)
+        set_state("单步 %d/%d"%(i+1,len(st["trace"])))
 
     def do_prev():
         if not st["trace"] or st["i"]<=0: return
         st["i"]-=1; goto(st["i"])
+        set_state("单步 %d/%d"%(st["i"]+1,len(st["trace"])))
 
     def do_clear():
-        ed.delete("1.0","end"); show_out(""); show_vars({})
+        ed.delete("1.0","end"); show_out(""); show_vars({}); clear_error()
+        set_state(""); update_status("就绪")
 
-    def do_sample():
-        ed.delete("1.0","end"); ed.insert("1.0",SAMPLE); hl(ed)
+    def load_text(s,path=None):
+        ed.delete("1.0","end"); ed.insert("1.0",s); hl(ed)
+        clear_error()
+        cur["path"]=path
+        root.title("HX 语言编码器" + (" - "+path if path else ""))
+        sync_editor()
+
+    def do_sample(): load_text(SAMPLE)
 
     def do_open():
-        p=tk.filedialog.askopenfilename(filetypes=[("HX 源码","*.hx"),("所有文件","*.*")])
+        p=filedialog.askopenfilename(filetypes=[("HX 源码","*.hx"),("所有文件","*.*")])
         if not p: return
         with open(p,encoding="utf-8") as f: s=f.read()
-        ed.delete("1.0","end"); ed.insert("1.0",s); hl(ed)
-        ed.tag_remove("err","1.0","end")
-        cur["path"]=p; root.title("HX 语言编码器 - "+p)
+        load_text(s,p)
 
     def do_save():
         p=cur["path"]
         if not p:
-            p=tk.filedialog.asksaveasfilename(defaultextension=".hx",
+            p=filedialog.asksaveasfilename(defaultextension=".hx",
                 filetypes=[("HX 源码","*.hx")])
             if not p: return
         with open(p,"w",encoding="utf-8") as f: f.write(ed.get("1.0","end-1c"))
         cur["path"]=p; root.title("HX 语言编码器 - "+p)
-
-    def btn(t,c):
-        b=tk.Button(bar,text=t,command=c,bg=BTN_BG,fg=FG,
-                    activebackground="#444444",activeforeground="#ffffff",
-                    relief="flat",padx=10,pady=4,cursor="hand2")
-        b.pack(side="left",padx=3); return b
-
-    btn("📂 打开",do_open)
-    btn("💾 保存",do_save)
-    btn("▶ 运行 (F5)",do_run)
-    btn("⏭ 单步 (F10)",do_step)
-    btn("⏮ 上一步",do_prev)
-    btn("载入示例",do_sample)
-    btn("清空",do_clear)
+        update_status("已保存 %s"%p)
 
     def do_cheat():
-        win=tk.Toplevel(root); win.title("HX 语法速查"); win.geometry("720x680")
+        win=tk.Toplevel(root); win.title("HX 语法速查"); win.geometry("760x720")
         win.configure(bg=BG)
-        txt=tk.Text(win,font=("Consolas",11),wrap="word",bg=BG,fg=FG,relief="flat",padx=8,pady=6)
+        txt=tk.Text(win,font=("Consolas",11),wrap="word",bg=BG,fg=FG,
+                    relief="flat",bd=0,padx=14,pady=10,highlightthickness=0)
         txt.pack(fill="both",expand=True)
         txt.insert("1.0",cheatsheet_text())
         txt.tag_configure("sec",font=("Microsoft YaHei",11,"bold"),foreground="#569cd6")
@@ -876,22 +1022,56 @@ def build_gui():
                 txt.tag_add("item","%d.0"%i,"%d.end"%i)
         txt.configure(state="disabled")
 
-    btn("📖 语法速查",do_cheat)
+    mkbtn("📂 打开",do_open)
+    mkbtn("💾 保存",do_save)
+    tk.Frame(bar,bg=BORDER,width=1).pack(side="left",fill="y",padx=6,pady=8)
+    mkbtn("▶ 运行  F5",do_run,accent=True)
+    mkbtn("⏭ 单步  F10",do_step)
+    mkbtn("⏮ 上一步",do_prev)
+    tk.Frame(bar,bg=BORDER,width=1).pack(side="left",fill="y",padx=6,pady=8)
+    mkbtn("示例",do_sample)
+    mkbtn("清空",do_clear)
+    mkbtn("📖 语法速查",do_cheat)
 
-    ed.bind("<KeyRelease>",lambda e: hl(ed))
+    ed.configure(yscrollcommand=lambda a,b: (sb.set(a,b), hooks["sync"]()))
+    hooks["sync"]=sync_editor
+
+    ed.bind("<KeyRelease>",lambda e: (hl(ed), sync_editor()))
+    ed.bind("<ButtonRelease-1>",lambda e: update_status())
+    ed.bind("<MouseWheel>",lambda e: root.after(1, sync_editor))
+    ed.bind("<Configure>",lambda e: root.after(1, sync_editor))
     root.bind("<F5>",lambda e: (do_run(),"break")[1])
     root.bind("<F10>",lambda e: (do_step(),"break")[1])
-    ed.insert("1.0",SAMPLE)
-    hl(ed)
+    root.bind("<Control-o>",lambda e: (do_open(),"break")[1])
+    root.bind("<Control-s>",lambda e: (do_save(),"break")[1])
+
+    if initial_path and os.path.exists(initial_path):
+        with open(initial_path,encoding="utf-8") as f: s=f.read()
+        load_text(s,initial_path)
+    else:
+        ed.insert("1.0",SAMPLE); hl(ed)
+
     ed.focus_set()
+    sync_editor()
     root.mainloop()
 
 
 if __name__=="__main__":
-    if len(sys.argv)>1:
+    args=sys.argv[1:]
+    edit_path=None
+    if "--edit" in args:
+        i=args.index("--edit")
+        rest=args[i+1:]
+        if rest: edit_path=rest[0]
+        args=args[:i]+rest[1:]
+    if edit_path:
         try: sys.stdout.reconfigure(encoding="utf-8")
         except Exception: pass
-        with open(sys.argv[1],encoding="utf-8") as f: src=f.read()
+        build_gui(edit_path)
+    elif args:
+        try: sys.stdout.reconfigure(encoding="utf-8")
+        except Exception: pass
+        with open(args[0],encoding="utf-8") as f: src=f.read()
         it=Interp()
         try:
             it.run(Parser(tokenize(src)).program())
@@ -900,4 +1080,3 @@ if __name__=="__main__":
         sys.stdout.write(it.text())
     else:
         build_gui()
-

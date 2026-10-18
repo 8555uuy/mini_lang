@@ -14,7 +14,7 @@ s = "hi";
 print("dar(s) =", dar(s));
 arr2 = [1, 2];
 print("dar(arr2) =", dar(arr2));
-print "无括号 print 也行";
+print("括号 print 更清晰");
 
 arr = [1, 2, 3];
 push(arr, 4);
